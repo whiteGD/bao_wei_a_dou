@@ -190,14 +190,16 @@ class Game {
         this.status = GAME_STATUS.ROOM;
         this.toastMessage('房间已创建，可复制房间号或分享邀请');
         this.startRoomWatcher();
-        return;
+        return true;
       }
 
       this.enterPlayingRoom();
       this.toastMessage('已创建房间，本地先进入对局');
+      return true;
     } catch (err) {
       this.toastMessage(err.message || '创建房间失败');
       this.audio.play('error');
+      return false;
     }
   }
 
@@ -411,6 +413,30 @@ class Game {
     this.lastRemoteStateAt = 0;
   }
 
+  // 结算弹窗的再开入口。联机对局必须重新创建云房间，不能退化成单机练习。
+  async restartFinishedGame() {
+    const restartOnline = this.isOnlineRoom();
+    this.closeRealtimeWatchers();
+    this.modal = null;
+
+    if (restartOnline) {
+      this.room = null;
+      const started = await this.createRoomAndStart();
+      if (!started) {
+        this.status = GAME_STATUS.FINISHED;
+        this.modal = {
+          title: '创建失败',
+          message: '联机房间创建失败，请检查网络后重试'
+        };
+      }
+      return;
+    }
+
+    this.room = null;
+    this.resetLocalGame();
+    this.status = GAME_STATUS.PLAYING;
+  }
+
   // 记录玩家低频操作。联网时写入 roomLogs，单机练习时直接忽略。
   emitAction(type, payload) {
     if (!this.room || !this.room.roomId || !this.cloud.enabled) return;
@@ -478,11 +504,15 @@ class Game {
     const tile = this.getTile(side, payload.cell);
     if (tile) tile.type = TILE.BUILD;
     if (payload.source === 'bench') this.players[side].bench[payload.benchIndex] = null;
-    this.effects.push({ type: 'levelUp', side, cell: cloneCell(payload.cell), life: 0.5 });
   }
 
   applyRemoteMerge(payload) {
     const side = SIDES.RIVAL;
+    if (typeof payload.targetBenchIndex === 'number') {
+      this.applyRemoteBenchMerge(payload, side);
+      return;
+    }
+
     const targetUnit = this.findUnitAt(side, payload.targetCell);
     const sourceUnit = this.takeRemoteSourceUnit(payload.source, payload.benchIndex, payload.fromCell, side, true);
     if (!targetUnit || !sourceUnit) return;
@@ -503,8 +533,39 @@ class Game {
     }
   }
 
+  applyRemoteBenchMerge(payload, side) {
+    const player = this.players[side];
+    const targetItem = player.bench[payload.targetBenchIndex];
+    const sourceItem = this.takeRemoteSourceUnit(payload.source, payload.benchIndex, payload.fromCell, side, true);
+    if (!targetItem || !sourceItem || targetItem === sourceItem) return;
+
+    if (canMergeBasic(sourceItem, targetItem)) {
+      targetItem.level += 1;
+      this.removeRemoteSourceUnit(sourceItem, payload.source, payload.benchIndex, side);
+      this.audio.play('merge');
+      return;
+    }
+
+    const heroName = getHeroNameFromChars(sourceItem, targetItem);
+    if (heroName) {
+      this.removeRemoteSourceUnit(sourceItem, payload.source, payload.benchIndex, side);
+      player.bench[payload.targetBenchIndex] = createHeroUnit(heroName, side, null);
+      this.effects.push({ type: 'heroSkill', side, text: heroName, life: 0.8 });
+      this.audio.play('merge');
+    }
+  }
+
   applyRemoteSwap(payload) {
     const side = SIDES.RIVAL;
+    if (typeof payload.targetBenchIndex === 'number') {
+      const player = this.players[side];
+      const sourceItem = player.bench[payload.benchIndex];
+      if (!sourceItem) return;
+      player.bench[payload.benchIndex] = player.bench[payload.targetBenchIndex] || null;
+      player.bench[payload.targetBenchIndex] = sourceItem;
+      return;
+    }
+
     const targetUnit = this.findUnitAt(side, payload.targetCell);
     if (!targetUnit) return;
 
@@ -1788,6 +1849,7 @@ class Game {
       const item = player.bench[i];
       if (item) {
         drawItemContent(ctx, item, rect.x + rect.w / 2, rect.y + rect.h / 2, cell);
+        drawItemLevelBadge(ctx, item, rect.x + rect.w - 6, rect.y + 12);
       }
     }
   }
@@ -2084,7 +2146,7 @@ class Game {
     });
     const btn = { x: rect.x + 44, y: rect.y + 142, w: rect.w - 88, h: 48 };
     this.buttons.modalRestart = btn;
-    this.drawButton(ctx, btn, '再来一局');
+    this.drawButton(ctx, btn, this.isOnlineRoom() ? '再开联机房间' : '再来一局');
     ctx.restore();
   }
 
@@ -2189,11 +2251,7 @@ class Game {
     }
 
     if (this.modal && pointInRect(p, this.buttons.modalRestart)) {
-      this.room = null;
-      this.closeRealtimeWatchers();
-      this.resetLocalGame();
-      this.status = GAME_STATUS.PLAYING;
-      this.modal = null;
+      this.restartFinishedGame();
       return;
     }
 
@@ -2280,8 +2338,8 @@ class Game {
   // 根据拖拽物落点决定行为：放回候选栏、使用铲子、合成或放置单位。
   dropDraggedItem(drag, point) {
     const benchIndex = this.getBenchIndexAt(point);
-    if (benchIndex !== -1 && drag.source === 'board') {
-      this.moveUnitToBench(drag.item, benchIndex);
+    if (benchIndex !== -1) {
+      this.dropToBench(drag, benchIndex);
       return;
     }
 
@@ -2305,6 +2363,35 @@ class Game {
     this.placeUnit(drag, cell);
   }
 
+  // 候选栏落点：支持棋盘回收、候选内移动/交换，以及在候选栏直接合成。
+  dropToBench(drag, benchIndex) {
+    if (drag.source === 'bench' && drag.benchIndex === benchIndex) return;
+
+    const player = this.players[SIDES.SELF];
+    const targetItem = player.bench[benchIndex];
+    if (targetItem) {
+      if (this.tryMergeToBench(drag, benchIndex)) return;
+      if (this.trySwapBenchItems(drag, benchIndex)) return;
+      this.toastMessage('候选格已满');
+      this.audio.play('error');
+      return;
+    }
+
+    if (drag.source === 'board') {
+      this.moveUnitToBench(drag.item, benchIndex);
+      return;
+    }
+
+    player.bench[benchIndex] = drag.item;
+    player.bench[drag.benchIndex] = null;
+    this.audio.play('place');
+    this.emitAction('SWAP', {
+      source: 'bench',
+      benchIndex: drag.benchIndex,
+      targetBenchIndex: benchIndex
+    });
+  }
+
   // 把棋盘上的单位移动回候选栏指定格子。
   moveUnitToBench(unit, benchIndex) {
     const player = this.players[SIDES.SELF];
@@ -2322,6 +2409,58 @@ class Game {
     this.emitAction('MOVE_TO_BENCH', { fromCell, benchIndex });
   }
 
+  tryMergeToBench(drag, targetBenchIndex) {
+    const player = this.players[SIDES.SELF];
+    const targetItem = player.bench[targetBenchIndex];
+    const sourceItem = drag.source === 'board' ? drag.item : drag.item;
+    if (!targetItem || !sourceItem || targetItem === sourceItem) return false;
+
+    if (canMergeBasic(sourceItem, targetItem)) {
+      targetItem.level += 1;
+      this.removeDraggedOriginal(drag);
+      this.audio.play('merge');
+      this.emitAction('MERGE', {
+        source: drag.source,
+        benchIndex: drag.benchIndex,
+        fromCell: drag.fromCell ? cloneCell(drag.fromCell) : null,
+        targetBenchIndex
+      });
+      return true;
+    }
+
+    const heroName = getHeroNameFromChars(sourceItem, targetItem);
+    if (heroName) {
+      this.removeDraggedOriginal(drag);
+      player.bench[targetBenchIndex] = createHeroUnit(heroName, SIDES.SELF, null);
+      this.effects.push({ type: 'heroSkill', side: SIDES.SELF, text: heroName, life: 0.8 });
+      this.audio.play('merge');
+      this.emitAction('MERGE', {
+        source: drag.source,
+        benchIndex: drag.benchIndex,
+        fromCell: drag.fromCell ? cloneCell(drag.fromCell) : null,
+        targetBenchIndex
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  trySwapBenchItems(drag, targetBenchIndex) {
+    if (drag.item.kind === ITEM_KIND.SHOVEL || drag.source !== 'bench') return false;
+    const player = this.players[SIDES.SELF];
+    const targetItem = player.bench[targetBenchIndex];
+    player.bench[targetBenchIndex] = drag.item;
+    player.bench[drag.benchIndex] = targetItem;
+    this.audio.play('place');
+    this.emitAction('SWAP', {
+      source: 'bench',
+      benchIndex: drag.benchIndex,
+      targetBenchIndex
+    });
+    return true;
+  }
+
   // 使用铲子把草地改成可放置的白色建造格。
   useShovel(drag, cell) {
     const tile = this.getTile(SIDES.SELF, cell);
@@ -2332,7 +2471,6 @@ class Game {
     }
     tile.type = TILE.BUILD;
     this.consumeDragSource(drag);
-    this.effects.push({ type: 'levelUp', side: SIDES.SELF, cell, life: 0.5 });
     this.audio.play('place');
     this.emitAction('SHOVEL', {
       source: drag.source,
@@ -2611,7 +2749,9 @@ function createWaveConfig(wave) {
 
 // 复制候选栏物品，避免直接复用云函数或随机池返回的原对象。
 function createBenchItem(item) {
-  return Object.assign({ id: makeId('bench') }, item);
+  const benchItem = Object.assign({ id: makeId('bench') }, item);
+  if (benchItem.kind !== ITEM_KIND.SHOVEL) benchItem.level = benchItem.level || 1;
+  return benchItem;
 }
 
 function serializeBenchItem(item) {
@@ -2620,7 +2760,7 @@ function serializeBenchItem(item) {
     return { id: item.id, kind: item.kind, unitId: item.unitId, level: item.level || 1 };
   }
   if (item.kind === ITEM_KIND.SPECIAL_CHAR) {
-    return { id: item.id, kind: item.kind, char: item.char };
+    return { id: item.id, kind: item.kind, char: item.char, level: item.level || 1 };
   }
   if (item.kind === ITEM_KIND.HERO) {
     return serializeUnit(item);
@@ -2719,7 +2859,7 @@ function createUnitFromItem(item, side) {
       kind: ITEM_KIND.SPECIAL_CHAR,
       char: item.char,
       text: item.char,
-      level: 1,
+      level: item.level || 1,
       attackCooldown: 0,
       skillCooldown: 0,
       attackSerial: item.attackSerial || 0,
@@ -2745,7 +2885,7 @@ function createHeroUnit(heroName, side, cell, id) {
     attackCooldown: 0,
     skillCooldown: 0,
     attackSerial: 0,
-    cell: { x: cell.x, y: cell.y }
+    cell: cell ? { x: cell.x, y: cell.y } : null
   };
 }
 
@@ -2796,6 +2936,17 @@ function drawItemContent(ctx, item, x, y, size) {
     stroke: '',
     strokeWidth: 0
   });
+}
+
+function drawItemLevelBadge(ctx, item, x, y) {
+  if (!item || item.kind === ITEM_KIND.SHOVEL) return;
+  ctx.save();
+  ctx.fillStyle = COLORS.danger;
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(String(item.level || 1), x, y);
+  ctx.restore();
 }
 
 // 纯 Canvas 铲子图标，避免用“铲”字和特殊合成字混淆。
