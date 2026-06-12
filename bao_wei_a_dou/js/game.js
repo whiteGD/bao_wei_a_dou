@@ -56,6 +56,7 @@ class Game {
     this.modal = null;
     this.buttons = {};
     this.layout = {};
+    this.systemInfo = null;
 
     this.room = null;
     this.selfSide = 'A';
@@ -896,19 +897,73 @@ class Game {
 
   // 根据当前屏幕尺寸计算棋盘、按钮、候选栏等区域，避免绘制和触摸判定各算一套。
   computeLayout() {
+    if (!this.systemInfo && typeof wx !== 'undefined' && wx.getSystemInfoSync) {
+      this.systemInfo = wx.getSystemInfoSync();
+    }
+    const systemInfo = this.systemInfo;
+    const safeArea = systemInfo && systemInfo.safeArea ? systemInfo.safeArea : null;
+    const safeTop = safeArea ? Math.max(0, safeArea.top || 0)
+      : Math.max(0, (systemInfo && systemInfo.statusBarHeight) || 0);
+    const safeBottom = safeArea ? Math.min(this.height, safeArea.bottom || this.height) : this.height;
     const margin = 18;
-    const boardW = Math.min(this.width - margin * 2, 360);
-    const cell = Math.floor(boardW / BOARD.cols);
-    const realBoardW = cell * BOARD.cols;
-    const boardH = cell * BOARD.rows;
-    const x = Math.floor((this.width - realBoardW) / 2);
-    const selfY = Math.max(160, this.height - boardH - 128);
+    const topBarY = safeTop + 8;
+    const topBarHeight = 48;
+    const recruitW = 132;
+    const recruitH = 58;
+    const gapTopToRival = 14;
+    const gapRivalToSelf = 18;
+    const gapBoardToBench = 14;
+    const gapBenchToRecruit = 14;
+    const bottomPadding = 14;
     const rivalScale = 0.65;
-    const rivalCell = Math.max(12, Math.floor(cell * rivalScale));
+    const maxBoardW = Math.min(this.width - margin * 2, 360);
+    let cell = Math.floor(maxBoardW / BOARD.cols);
+
+    const makeMetrics = (cellSize) => {
+      const realBoardW = cellSize * BOARD.cols;
+      const boardH = cellSize * BOARD.rows;
+      const rivalCell = Math.max(10, Math.floor(cellSize * rivalScale));
+      const rivalH = rivalCell * BOARD.rows;
+      const benchCell = Math.floor((realBoardW - 16) / 5);
+      const rivalY = topBarY + topBarHeight + gapTopToRival;
+      const recruitY = safeBottom - bottomPadding - recruitH;
+      const benchY = recruitY - gapBenchToRecruit - benchCell;
+      const selfY = benchY - gapBoardToBench - boardH;
+      const minSelfY = rivalY + rivalH + gapRivalToSelf;
+
+      return {
+        realBoardW,
+        boardH,
+        rivalCell,
+        rivalH,
+        benchCell,
+        rivalY,
+        recruitY,
+        benchY,
+        selfY,
+        minSelfY
+      };
+    };
+
+    let metrics = makeMetrics(cell);
+    while (cell > 18 && metrics.selfY < metrics.minSelfY) {
+      cell -= 1;
+      metrics = makeMetrics(cell);
+    }
+
+    const realBoardW = metrics.realBoardW;
+    const boardH = metrics.boardH;
+    const x = Math.floor((this.width - realBoardW) / 2);
+    const selfY = metrics.selfY;
+    const rivalCell = metrics.rivalCell;
     const rivalW = rivalCell * BOARD.cols;
 
     this.layout = {
       margin,
+      safeTop,
+      safeBottom,
+      topBarY,
+      topBarHeight,
       cell,
       boardX: x,
       selfBoardY: selfY,
@@ -916,16 +971,16 @@ class Game {
       boardH,
       rivalCell,
       rivalBoardX: Math.floor((this.width - rivalW) / 2),
-      rivalBoardY: 78,
+      rivalBoardY: metrics.rivalY,
       rivalBoardW: rivalW,
       rivalBoardH: rivalCell * BOARD.rows,
-      benchY: selfY + boardH + 16,
-      benchCell: Math.floor((realBoardW - 16) / 5),
-      recruitButton: { x: x + realBoardW / 2 - 66, y: selfY + boardH + 78, w: 132, h: 58 },
-      pauseButton: { x: 14, y: 16, w: 44, h: 34 },
-      muteButton: { x: this.width - 58, y: 16, w: 44, h: 34 },
-      settingButton: { x: this.width - 112, y: 16, w: 44, h: 34 },
-      resetButton: { x: this.width - 166, y: 16, w: 44, h: 34 }
+      benchY: metrics.benchY,
+      benchCell: metrics.benchCell,
+      recruitButton: { x: x + realBoardW / 2 - recruitW / 2, y: metrics.recruitY, w: recruitW, h: recruitH },
+      pauseButton: { x: 14, y: topBarY, w: 44, h: 34 },
+      muteButton: { x: this.width - 58, y: topBarY, w: 44, h: 34 },
+      settingButton: { x: this.width - 112, y: topBarY, w: 44, h: 34 },
+      resetButton: { x: this.width - 166, y: topBarY, w: 44, h: 34 }
     };
   }
 
@@ -1071,6 +1126,7 @@ class Game {
 
   // 绘制顶部资源和状态信息，包括血量、金币、波次、静音等按钮。
   drawTopBar(ctx) {
+    const y = this.layout.topBarY;
     this.drawIconButton(ctx, this.layout.pauseButton, this.status === GAME_STATUS.PAUSED ? '▶' : 'Ⅱ');
     this.drawIconButton(ctx, this.layout.resetButton, '↻');
     this.drawIconButton(ctx, this.layout.settingButton, '设');
@@ -1080,16 +1136,16 @@ class Game {
     ctx.fillStyle = COLORS.ink;
     ctx.font = '18px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`金币 ${player.gold}`, 72, 28);
-    ctx.fillText(`生命 ${'♥'.repeat(Math.max(0, player.hp))}`, 72, 52);
+    ctx.fillText(`金币 ${player.gold}`, 72, y + 12);
+    ctx.fillText(`生命 ${'♥'.repeat(Math.max(0, player.hp))}`, 72, y + 36);
 
     const board = this.boards[SIDES.SELF];
     ctx.textAlign = 'center';
     ctx.font = 'bold 18px serif';
-    ctx.fillText(`第${Math.max(1, board.wave || 1)}波`, this.width / 2, 36);
+    ctx.fillText(`第${Math.max(1, board.wave || 1)}波`, this.width / 2, y + 20);
     if (!board.waveActive) {
       ctx.font = '13px sans-serif';
-      ctx.fillText(`准备 ${Math.ceil(board.waveClock)}s`, this.width / 2, 56);
+      ctx.fillText(`准备 ${Math.ceil(board.waveClock)}s`, this.width / 2, y + 40);
     }
   }
 
