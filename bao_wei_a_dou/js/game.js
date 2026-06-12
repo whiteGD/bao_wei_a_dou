@@ -716,8 +716,13 @@ class Game {
         side,
         from: { x: unit.cell.x, y: unit.cell.y },
         to: this.enemyCell(target),
+        attackType: unit.attackType || 'single',
+        unitKind: unit.kind,
+        unitId: unit.unitId || '',
+        heroName: unit.heroName || '',
         text: `-${damage.toFixed(0)}`,
-        life: 0.35
+        life: 0.45,
+        maxLife: 0.45
       });
     });
 
@@ -1443,6 +1448,122 @@ class Game {
   }
 
   // 绘制伤害、金币、升级、封格等短生命周期特效。
+  drawDamageEffect(ctx, effect, side, small) {
+    const from = this.cellToPixel(effect.from, side, small);
+    const to = this.cellToPixel(effect.to, side, small);
+    const cell = small ? this.layout.rivalCell : this.layout.cell;
+    const scale = small ? 0.72 : 1;
+    const maxLife = effect.maxLife || 0.45;
+    const progress = clamp(1 - effect.life / maxLife, 0, 1);
+    const fromCenter = { x: from.x + cell / 2, y: from.y + cell / 2 };
+    const toCenter = { x: to.x + cell / 2, y: to.y + cell / 2 };
+
+    ctx.save();
+    ctx.globalAlpha = clamp(effect.life / maxLife, 0, 1);
+    this.drawTypedDamageEffect(ctx, effect, fromCenter, toCenter, progress, scale);
+    this.drawFloatingDamageText(ctx, effect, toCenter, progress, scale);
+    ctx.restore();
+  }
+
+  drawTypedDamageEffect(ctx, effect, from, to, progress, scale) {
+    if (effect.attackType === 'area' || effect.unitId === 'cavalry') {
+      this.drawImpactRing(ctx, to, progress, scale);
+      return;
+    }
+    if (effect.attackType === 'pierce' || effect.unitId === 'spear') {
+      this.drawPierceEffect(ctx, from, to, progress, scale);
+      return;
+    }
+    if (effect.unitId === 'bow') {
+      this.drawArrowEffect(ctx, from, to, progress, scale);
+      return;
+    }
+    this.drawSlashEffect(ctx, to, progress, scale);
+  }
+
+  drawImpactRing(ctx, to, progress, scale) {
+    const hit = clamp(progress, 0, 1);
+    ctx.strokeStyle = `rgba(214, 111, 38, ${1 - hit * 0.8})`;
+    ctx.lineWidth = 3 * scale;
+    ctx.beginPath();
+    ctx.arc(to.x, to.y, (5 + hit * 20) * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = `rgba(225, 83, 61, ${0.26 * (1 - hit)})`;
+    ctx.beginPath();
+    ctx.arc(to.x, to.y, (4 + hit * 10) * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawPierceEffect(ctx, from, to, progress, scale) {
+    const travel = clamp(progress / 0.7, 0, 1);
+    const x = lerp(from.x, to.x, travel);
+    const y = lerp(from.y, to.y, travel);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+    const ux = dx / len;
+    const uy = dy / len;
+    const nx = -uy;
+    const ny = ux;
+    const length = 22 * scale;
+    const width = 4 * scale;
+
+    ctx.fillStyle = 'rgba(255, 232, 154, 0.88)';
+    ctx.beginPath();
+    ctx.moveTo(x + ux * length, y + uy * length);
+    ctx.lineTo(x - ux * length * 0.45 + nx * width, y - uy * length * 0.45 + ny * width);
+    ctx.lineTo(x - ux * length * 0.45 - nx * width, y - uy * length * 0.45 - ny * width);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  drawArrowEffect(ctx, from, to, progress, scale) {
+    const travel = clamp(progress / 0.78, 0, 1);
+    const x = lerp(from.x, to.x, travel);
+    const y = lerp(from.y, to.y, travel);
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.strokeStyle = '#5b3519';
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath();
+    ctx.moveTo(-10 * scale, 0);
+    ctx.lineTo(8 * scale, 0);
+    ctx.stroke();
+    ctx.fillStyle = '#e7c56b';
+    ctx.beginPath();
+    ctx.moveTo(10 * scale, 0);
+    ctx.lineTo(3 * scale, -4 * scale);
+    ctx.lineTo(3 * scale, 4 * scale);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  drawSlashEffect(ctx, to, progress, scale) {
+    const swing = clamp(progress, 0, 1);
+    const r = 14 * scale;
+    ctx.strokeStyle = `rgba(255, 238, 190, ${1 - swing * 0.35})`;
+    ctx.lineWidth = 4 * scale;
+    ctx.beginPath();
+    ctx.arc(to.x, to.y, r, -0.95 + swing * 0.5, 0.75 + swing * 0.5);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(225, 83, 61, ${0.65 * (1 - swing)})`;
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath();
+    ctx.arc(to.x, to.y, r * 0.58, 0.15, Math.PI * 1.15);
+    ctx.stroke();
+  }
+
+  drawFloatingDamageText(ctx, effect, to, progress, scale) {
+    drawCenteredText(ctx, effect.text, to.x, to.y - (8 + progress * 18) * scale, {
+      font: `${Math.floor(13 * scale)}px sans-serif`,
+      color: COLORS.danger
+    });
+  }
+
   drawEffects(ctx) {
     this.effects.forEach((effect) => {
       ctx.save();
@@ -1451,19 +1572,7 @@ class Game {
       const small = side === SIDES.RIVAL;
 
       if (effect.type === 'damage') {
-        const from = this.cellToPixel(effect.from, side, small);
-        const to = this.cellToPixel(effect.to, side, small);
-        const cell = small ? this.layout.rivalCell : this.layout.cell;
-        ctx.strokeStyle = '#3e2723';
-        ctx.lineWidth = small ? 1 : 2;
-        ctx.beginPath();
-        ctx.moveTo(from.x + cell / 2, from.y + cell / 2);
-        ctx.lineTo(to.x + cell / 2, to.y + cell / 2);
-        ctx.stroke();
-        drawCenteredText(ctx, effect.text, to.x + cell / 2, to.y - 4, {
-          font: '13px sans-serif',
-          color: COLORS.danger
-        });
+        this.drawDamageEffect(ctx, effect, side, small);
       }
 
       if (effect.type === 'levelUp' || effect.type === 'coin' || effect.type === 'seal') {
