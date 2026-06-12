@@ -90,9 +90,9 @@ const PLAYER_DEFAULTS = {
 
 // 征兵池权重，总和按 100 理解：基础兵最多，特殊字少量，铲子最少。
 const RECRUIT_WEIGHTS = {
-  basic: 80,
-  specialChar: 15,
-  shovel: 5
+  basic: 68,
+  specialChar: 20,
+  shovel: 12
 };
 
 // 基础兵种 ID 列表，用于随机征兵和从配置表里取具体数值。

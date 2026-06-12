@@ -1362,7 +1362,7 @@ function createWaveConfig(wave) {
   return {
     wave,
     enemyCount: 8 + Math.floor(wave * 1.5),
-    enemyHp: 10 + wave * 4,
+    enemyHp: 4 + wave * 4,
     enemyArmor: Math.floor(wave / 3),
     enemySpeed: 1,
     spawnInterval: Math.max(0.35, 0.9 - wave * 0.015),
