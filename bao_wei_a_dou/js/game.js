@@ -64,6 +64,11 @@ class Game {
     this.roomWatcher = null;
     this.logWatcher = null;
     this.processedLogIds = {};
+    this.settlingAt = 0;
+    this.settlingFailedSide = null;
+    this.settlingReason = '';
+    this.nextResultPollAt = 0;
+    this.resultPolling = false;
 
     this.players = {};
     this.boards = {};
@@ -294,6 +299,11 @@ class Game {
     this.drag = null;
     this.selectedUnit = null;
     this.toast = null;
+    this.settlingAt = 0;
+    this.settlingFailedSide = null;
+    this.settlingReason = '';
+    this.nextResultPollAt = 0;
+    this.resultPolling = false;
   }
 
   // 记录玩家低频操作。联网时写入 roomLogs，单机练习时直接忽略。
@@ -449,6 +459,12 @@ class Game {
   applyRemoteFinish(payload) {
     if (this.status === GAME_STATUS.FINISHED) return;
     this.status = GAME_STATUS.FINISHED;
+    this.settlingAt = 0;
+    this.settlingFailedSide = null;
+    this.settlingReason = '';
+    this.nextResultPollAt = 0;
+    this.resultPolling = false;
+    this.audio.play('finish');
     const failedSide = payload.failedSide;
     const selfFailed = failedSide === this.selfSide;
     this.modal = {
@@ -480,6 +496,10 @@ class Game {
     if (this.status === GAME_STATUS.PLAYING) {
       this.updateSide(SIDES.SELF, dt);
       this.updateSide(SIDES.RIVAL, dt);
+    }
+
+    if (this.status === GAME_STATUS.SETTLING) {
+      this.updateSettlement();
     }
 
     // 所有效果都用剩余时间控制生命周期，渲染时按进度显示淡出。
@@ -620,28 +640,28 @@ class Game {
     this.effects.push({ type: 'baseHit', side, life: 0.5 });
 
     if (player.hp <= 0) {
-      this.finishGame(side);
+      this.finishGame(side, 'baseDestroyed');
     }
   }
 
   // 结束对局，展示结果弹窗，并通知云服务记录结算。
-  async finishGame(failedSide) {
-    if (this.status === GAME_STATUS.FINISHED) return;
+  async finishGame(failedSide, reason) {
+    if (this.status === GAME_STATUS.FINISHED || this.status === GAME_STATUS.SETTLING) return;
+    if (this.isOnlineRoom()) {
+      if (failedSide === SIDES.SELF) {
+        this.reportSelfFailure(reason || 'baseDestroyed');
+      } else {
+        this.toastMessage('等待对方确认结算');
+      }
+      return;
+    }
     this.status = GAME_STATUS.FINISHED;
     this.audio.play('finish');
     const winner = failedSide === SIDES.SELF ? SIDES.RIVAL : SIDES.SELF;
-    const failedRoomSide = this.toRoomSide(failedSide);
-    const winnerRoomSide = this.toRoomSide(winner);
     this.modal = {
       title: failedSide === SIDES.SELF ? '战败' : '获胜',
       message: winner === SIDES.SELF ? '你坚持到了最后' : '对方坚持到了最后'
     };
-    this.emitAction('FINISH', { failedSide: failedRoomSide, winner: winnerRoomSide });
-    await this.cloud.finishGame({
-      failedSide: failedRoomSide,
-      winner: winnerRoomSide,
-      roomId: this.room && this.room.roomId
-    });
   }
 
   toRoomSide(localSide) {
@@ -650,6 +670,77 @@ class Game {
   }
 
   // 推进所有己方单位攻击冷却，冷却结束后寻找目标并攻击。
+  getOppositeRoomSide(roomSide) {
+    return roomSide === 'A' ? 'B' : 'A';
+  }
+
+  enterSettling(failedSide, reason) {
+    if (this.status === GAME_STATUS.FINISHED) return;
+    this.status = GAME_STATUS.SETTLING;
+    this.settlingAt = now();
+    this.settlingFailedSide = failedSide;
+    this.settlingReason = reason || '';
+    this.nextResultPollAt = 0;
+    this.resultPolling = false;
+    this.drag = null;
+    this.selectedUnit = null;
+    this.toastMessage('正在确认结算...');
+  }
+
+  async reportSelfFailure(reason) {
+    this.enterSettling(SIDES.SELF, reason || 'baseDestroyed');
+    try {
+      const result = await this.cloud.finishGame({
+        roomId: this.room && this.room.roomId,
+        reason: reason || 'baseDestroyed'
+      });
+      if (result && result.result) {
+        this.applyRemoteFinish(result.result);
+      }
+    } catch (err) {
+      console.warn('report failure failed', err);
+      this.toastMessage('结算上报失败，等待同步');
+    }
+  }
+
+  updateSettlement() {
+    if (this.room && this.room.status === 'finished' && this.room.result) {
+      this.applyRemoteFinish(this.room.result);
+      return;
+    }
+
+    const elapsed = now() - this.settlingAt;
+    if (this.settlingFailedSide === SIDES.SELF && elapsed >= 3000) {
+      this.applyRemoteFinish({
+        failedSide: this.selfSide,
+        winner: this.getOppositeRoomSide(this.selfSide),
+        reason: this.settlingReason || 'baseDestroyed',
+        fallback: true
+      });
+      return;
+    }
+
+    if (this.nextResultPollAt && now() < this.nextResultPollAt) return;
+    if (this.resultPolling || !this.room || !this.room.roomId || !this.cloud.enabled) return;
+
+    this.resultPolling = true;
+    this.nextResultPollAt = now() + 1000;
+    this.cloud.getRoom(this.room.roomId)
+      .then((room) => {
+        if (!room) return;
+        this.room = Object.assign({}, this.room, room);
+        if (room.status === 'finished' && room.result) {
+          this.applyRemoteFinish(room.result);
+        }
+      })
+      .catch((err) => {
+        console.warn('poll room result failed', err);
+      })
+      .finally(() => {
+        this.resultPolling = false;
+      });
+  }
+
   isOnlineRoom() {
     return !!(this.room && this.cloud.enabled);
   }
@@ -664,12 +755,12 @@ class Game {
         confirmColor: '#ba2f2f',
         cancelText: '取消',
         success: (res) => {
-          if (res.confirm) this.finishGame(SIDES.SELF);
+          if (res.confirm) this.finishGame(SIDES.SELF, 'surrender');
         }
       });
       return;
     }
-    this.finishGame(SIDES.SELF);
+    this.finishGame(SIDES.SELF, 'surrender');
   }
 
   updateUnits(side, dt) {
@@ -920,6 +1011,7 @@ class Game {
     }
 
     if (this.toast) this.drawToast(ctx);
+    if (this.status === GAME_STATUS.SETTLING) this.drawSettlementOverlay(ctx);
     if (this.modal) this.drawModal(ctx);
     if (this.drag) this.drawDraggedItem(ctx);
   }
@@ -1641,6 +1733,28 @@ class Game {
   }
 
   // 绘制结算弹窗和弹窗按钮。
+  drawSettlementOverlay(ctx) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(36,25,21,0.38)';
+    ctx.fillRect(0, 0, this.width, this.height);
+    const rect = { x: 46, y: this.height / 2 - 58, w: this.width - 92, h: 116 };
+    ctx.fillStyle = COLORS.panel;
+    ctx.strokeStyle = COLORS.ink;
+    ctx.lineWidth = 3;
+    roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, 8);
+    ctx.fill();
+    ctx.stroke();
+    drawCenteredText(ctx, '正在确认结算', this.width / 2, rect.y + 42, {
+      font: 'bold 24px serif',
+      color: COLORS.ink
+    });
+    drawCenteredText(ctx, '请稍候...', this.width / 2, rect.y + 76, {
+      font: '15px sans-serif',
+      color: COLORS.mutedInk
+    });
+    ctx.restore();
+  }
+
   drawModal(ctx) {
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
@@ -1715,6 +1829,8 @@ class Game {
       this.modal = null;
       return;
     }
+
+    if (this.status === GAME_STATUS.SETTLING) return;
 
     if (pointInRect(p, this.layout.pauseButton)) {
       this.requestPause();

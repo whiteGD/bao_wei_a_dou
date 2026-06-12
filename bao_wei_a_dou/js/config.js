@@ -38,6 +38,7 @@ const GAME_STATUS = {
   PLAYING: 'playing',
   PAUSE_PENDING: 'pausePending',
   PAUSED: 'paused',
+  SETTLING: 'settling',
   FINISHED: 'finished'
 };
 
