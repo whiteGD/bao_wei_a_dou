@@ -756,6 +756,14 @@ class Game {
     ctx.save();
     if (small) ctx.globalAlpha = 0.74;
 
+    if (small && side === SIDES.RIVAL) {
+      const rival = this.players[SIDES.RIVAL];
+      ctx.fillStyle = COLORS.ink;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`对手 生命 ${'♥'.repeat(Math.max(0, rival.hp))}`, x0, y0 - 10);
+    }
+
     ctx.fillStyle = COLORS.shadow;
     roundedRect(ctx, x0 + 3, y0 + 4, cell * BOARD.cols, cell * BOARD.rows, 5);
     ctx.fill();
@@ -895,15 +903,27 @@ class Game {
     ctx.fill();
     ctx.stroke();
 
+    const enemyName = getEnemyDisplayName(enemy);
+    drawCenteredText(ctx, enemyName.length > 1 ? enemyName.slice(0, 1) : enemyName, cx, cy, {
+      font: `bold ${Math.floor(cell * (small ? 0.28 : 0.32))}px serif`,
+      color: '#f8eee0'
+    });
+
     if (!small) {
-      drawCenteredText(ctx, enemy.isGeneral ? enemy.name.slice(0, 1) : '贼', cx, cy, {
-        font: `bold ${Math.floor(cell * 0.32)}px serif`,
-        color: '#f8eee0'
-      });
+      ctx.font = `bold ${Math.floor(cell * 0.22)}px sans-serif`;
+      ctx.fillStyle = COLORS.ink;
+      ctx.textAlign = 'center';
+      ctx.fillText(enemyName, cx, cy + cell * 0.48);
+
       ctx.fillStyle = '#4f1e1e';
       ctx.fillRect(pos.x + 4, pos.y + 3, cell - 8, 4);
       ctx.fillStyle = '#e1533d';
       ctx.fillRect(pos.x + 4, pos.y + 3, (cell - 8) * clamp(enemy.hp / enemy.maxHp, 0, 1), 4);
+    } else {
+      ctx.font = `bold ${Math.floor(cell * 0.18)}px sans-serif`;
+      ctx.fillStyle = COLORS.ink;
+      ctx.textAlign = 'center';
+      ctx.fillText(enemyName.length > 2 ? enemyName.slice(0, 2) : enemyName, cx, cy + cell * 0.46);
     }
     ctx.restore();
   }
@@ -1652,6 +1672,11 @@ function getUnitRoleLabel(unit) {
   if (unit.kind === ITEM_KIND.BASIC) return BASIC_UNITS[unit.unitId].role || getAttackTypeLabel(unit.attackType);
   if (unit.kind === ITEM_KIND.HERO) return getAttackTypeLabel(unit.attackType);
   return '合成字';
+}
+
+// 敌人显示名称。普通敌人用配置里的 name，大将用完整大将名。
+function getEnemyDisplayName(enemy) {
+  return enemy.name || (enemy.isGeneral ? '大将' : '贼');
 }
 
 // 把攻击类型转成玩家能看懂的中文。
