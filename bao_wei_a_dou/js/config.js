@@ -177,12 +177,12 @@ const HERO_PAIRS = {
 
 // 武将基础配置。baseType 决定大致定位，skill 决定在 tryHeroSkill 里触发的技能逻辑。
 const HERO_CONFIGS = {
-  张飞: { text: '张飞', baseType: 'blade', attack: 8, attackSpeed: 1.1, range: 1, skill: 'roar' },
-  赵云: { text: '赵云', baseType: 'spear', attack: 6, attackSpeed: 1.25, range: 3, skill: 'combo' },
-  刘备: { text: '刘备', baseType: 'support', attack: 4, attackSpeed: 1, range: 3, skill: 'boost' },
-  关羽: { text: '关羽', baseType: 'blade', attack: 7, attackSpeed: 1.2, range: 2, skill: 'slash' },
-  马超: { text: '马超', baseType: 'cavalry', attack: 6, attackSpeed: 1.25, range: 2, skill: 'slow' },
-  黄忠: { text: '黄忠', baseType: 'bow', attack: 6, attackSpeed: 1.25, range: 4, skill: 'arrowRain' }
+  张飞: { text: '张飞', baseType: 'blade', attack: 8, attackSpeed: 1.1, range: 1.5, skill: 'roar' },
+  赵云: { text: '赵云', baseType: 'spear', attack: 6, attackSpeed: 1.25, range: 2.5, skill: 'combo' },
+  刘备: { text: '刘备', baseType: 'support', attack: 4, attackSpeed: 1, range: 2.5, skill: 'boost' },
+  关羽: { text: '关羽', baseType: 'blade', attack: 7, attackSpeed: 1.2, range: 2.1, skill: 'slash' },
+  马超: { text: '马超', baseType: 'cavalry', attack: 6, attackSpeed: 1.25, range: 2.1, skill: 'slow' },
+  黄忠: { text: '黄忠', baseType: 'bow', attack: 6, attackSpeed: 1.25, range: 3.5, skill: 'arrowRain' }
 };
 
 // 武将等级成长倍率。最终属性 = 武将基础属性 * 当前等级倍率。
