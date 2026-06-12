@@ -979,8 +979,7 @@ class Game {
       recruitButton: { x: x + realBoardW / 2 - recruitW / 2, y: metrics.recruitY, w: recruitW, h: recruitH },
       pauseButton: { x: 14, y: topBarY, w: 44, h: 34 },
       muteButton: { x: this.width - 58, y: topBarY, w: 44, h: 34 },
-      settingButton: { x: this.width - 112, y: topBarY, w: 44, h: 34 },
-      resetButton: { x: this.width - 166, y: topBarY, w: 44, h: 34 }
+      resetButton: { x: this.width - 112, y: topBarY, w: 44, h: 34 }
     };
   }
 
@@ -1110,7 +1109,6 @@ class Game {
     this.buttons = {
       pause: this.layout.pauseButton,
       mute: this.layout.muteButton,
-      setting: this.layout.settingButton,
       reset: this.layout.resetButton,
       recruit: this.layout.recruitButton
     };
@@ -1129,15 +1127,13 @@ class Game {
     const y = this.layout.topBarY;
     this.drawIconButton(ctx, this.layout.pauseButton, this.status === GAME_STATUS.PAUSED ? '▶' : 'Ⅱ');
     this.drawIconButton(ctx, this.layout.resetButton, '↻');
-    this.drawIconButton(ctx, this.layout.settingButton, '设');
     this.drawIconButton(ctx, this.layout.muteButton, this.audio.muted ? '静' : '音');
 
     const player = this.players[SIDES.SELF];
     ctx.fillStyle = COLORS.ink;
     ctx.font = '18px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`金币 ${player.gold}`, 72, y + 12);
-    ctx.fillText(`生命 ${'♥'.repeat(Math.max(0, player.hp))}`, 72, y + 36);
+    ctx.fillText(`金币 ${player.gold}`, 72, y + 25);
 
     const board = this.boards[SIDES.SELF];
     ctx.textAlign = 'center';
@@ -1159,14 +1155,6 @@ class Game {
 
     ctx.save();
     if (small) ctx.globalAlpha = 0.74;
-
-    if (small && side === SIDES.RIVAL) {
-      const rival = this.players[SIDES.RIVAL];
-      ctx.fillStyle = COLORS.ink;
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(`对手 生命 ${'♥'.repeat(Math.max(0, rival.hp))}`, x0, y0 - 10);
-    }
 
     ctx.fillStyle = COLORS.shadow;
     roundedRect(ctx, x0 + 3, y0 + 4, cell * BOARD.cols, cell * BOARD.rows, 5);
@@ -1194,6 +1182,12 @@ class Game {
     board.enemies.forEach((enemy) => this.drawEnemy(ctx, enemy, side, small));
 
     const base = this.cellToPixel(BOARD.baseCell, side, small);
+    const player = this.players[side];
+    const hpText = '♥'.repeat(Math.max(0, player.hp));
+    drawCenteredText(ctx, hpText, base.x + cell / 2, base.y - (small ? 3 : 7), {
+      font: `bold ${Math.floor(cell * (small ? 0.46 : 0.42))}px sans-serif`,
+      color: COLORS.danger
+    });
     drawCenteredText(ctx, '斗', base.x + cell / 2, base.y + cell / 2, {
       font: `bold ${Math.floor(cell * 0.72)}px serif`,
       color: COLORS.ink
@@ -1563,10 +1557,6 @@ class Game {
     }
     if (pointInRect(p, this.layout.muteButton)) {
       this.audio.toggleMuted();
-      return;
-    }
-    if (pointInRect(p, this.layout.settingButton)) {
-      this.toastMessage('设置：音=静音，↻=重开，Ⅱ=暂停');
       return;
     }
     if (pointInRect(p, this.layout.resetButton)) {
