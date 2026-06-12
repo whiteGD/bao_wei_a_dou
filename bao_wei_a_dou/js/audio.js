@@ -21,6 +21,8 @@ class AudioManager {
 
   play(name) {
     if (this.muted) return;
+    // 暂时屏蔽拖动反馈，保留调用点方便后续测试后恢复。
+    if (name === 'drag') return;
 
     const audio = this.audioMap[name];
     if (audio) {

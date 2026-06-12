@@ -54,7 +54,6 @@ class Game {
     this.modal = null;
     this.buttons = {};
     this.layout = {};
-    this.referenceImage = null;
 
     this.room = null;
     this.selfSide = 'A';
@@ -73,7 +72,6 @@ class Game {
   start() {
     this.cloud.init();
     this.readLaunchOptions();
-    this.loadReferenceImage();
     this.bindEvents();
     this.resetLocalGame();
     this.showHome();
@@ -99,17 +97,6 @@ class Game {
     wx.onTouchStart(this.handleTouchStart);
     wx.onTouchMove(this.handleTouchMove);
     wx.onTouchEnd(this.handleTouchEnd);
-  }
-
-  loadReferenceImage() {
-    // 参考图只作为淡背景装饰，不影响游戏逻辑。加载失败也不阻塞游戏。
-    try {
-      const img = wx.createImage();
-      img.onload = () => { this.referenceImage = img; };
-      img.src = 'image.png';
-    } catch (err) {
-      this.referenceImage = null;
-    }
   }
 
   showHome() {
@@ -595,26 +582,64 @@ class Game {
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, this.width, this.height);
 
-    if (this.referenceImage) {
-      ctx.save();
-      ctx.globalAlpha = 0.07;
-      ctx.drawImage(this.referenceImage, 0, 0, this.width, this.height);
-      ctx.restore();
-    }
-
     // 简单山水线条，作为无正式资源阶段的水墨风占位背景。
     ctx.save();
-    ctx.strokeStyle = 'rgba(80, 65, 54, 0.13)';
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 4; i += 1) {
-      const y = 72 + i * 12;
-      ctx.beginPath();
-      ctx.moveTo(20, y);
-      ctx.lineTo(80, y - 36);
-      ctx.lineTo(140, y - 8);
-      ctx.lineTo(210, y - 44);
-      ctx.lineTo(this.width - 18, y - 4);
-      ctx.stroke();
+    const mountainBands = [
+      { y: 58, height: 28, count: 4, alpha: 0.13 },
+      { y: 178, height: 24, count: 3, alpha: 0.08 },
+      { y: 356, height: 30, count: 4, alpha: 0.07 },
+      { y: 538, height: 24, count: 3, alpha: 0.08 }
+    ];
+    mountainBands.forEach((band) => {
+      ctx.strokeStyle = `rgba(80, 65, 54, ${band.alpha})`;
+      ctx.lineWidth = 2;
+      for (let i = 0; i < band.count; i += 1) {
+        const y = band.y + i * 11;
+        const height = band.height + (i % 2) * 8;
+        const startX = 16 + (i % 2) * 18;
+        const endX = this.width - 16 - ((i + 1) % 2) * 18;
+        ctx.beginPath();
+        ctx.moveTo(startX, y);
+        ctx.lineTo(this.width * 0.2, y - height);
+        ctx.lineTo(this.width * 0.38, y - height * 0.35);
+        ctx.lineTo(this.width * 0.58, y - height * 1.15);
+        ctx.lineTo(this.width * 0.78, y - height * 0.2);
+        ctx.lineTo(endX, y - height * 0.65);
+        ctx.stroke();
+      }
+    });
+
+    ctx.strokeStyle = 'rgba(80, 65, 54, 0.095)';
+    ctx.lineWidth = 1;
+    const waterBands = [
+      { y: 122, rows: 2 },
+      { y: 268, rows: 3 },
+      { y: 430, rows: 3 },
+      { y: 610, rows: 2 }
+    ];
+    waterBands.forEach((band, bandIndex) => {
+      for (let row = 0; row < band.rows; row += 1) {
+        const y = band.y + row * 9;
+        const offset = ((bandIndex + row) % 2) * 28;
+        for (let x = 28 + offset; x < this.width - 36; x += 74) {
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.quadraticCurveTo(x + 16, y - 5, x + 32, y);
+          ctx.quadraticCurveTo(x + 46, y + 4, x + 62, y - 1);
+          ctx.stroke();
+        }
+      }
+    });
+
+    ctx.strokeStyle = 'rgba(80, 65, 54, 0.06)';
+    for (let i = 0; i < 5; i += 1) {
+      const y = 86 + i * 104;
+      for (let x = 42; x < this.width - 54; x += 96) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + 22, y + 7, x + 48, y);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   }
