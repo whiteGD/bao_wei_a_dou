@@ -702,6 +702,7 @@ class Game {
   attackTargets(side, unit, targets) {
     const stats = getUnitStats(unit);
     const board = this.boards[side];
+    const heroConfig = unit.kind === ITEM_KIND.HERO ? HERO_CONFIGS[unit.heroName] : null;
     let attack = stats.attack;
 
     if (unit.kind === ITEM_KIND.BASIC) {
@@ -719,6 +720,7 @@ class Game {
         attackType: unit.attackType || 'single',
         unitKind: unit.kind,
         unitId: unit.unitId || '',
+        baseType: heroConfig ? heroConfig.baseType : '',
         heroName: unit.heroName || '',
         text: `-${damage.toFixed(0)}`,
         life: 0.45,
@@ -1474,7 +1476,7 @@ class Game {
       this.drawPierceEffect(ctx, from, to, progress, scale);
       return;
     }
-    if (effect.unitId === 'bow') {
+    if (effect.unitId === 'bow' || effect.baseType === 'bow') {
       this.drawArrowEffect(ctx, from, to, progress, scale);
       return;
     }
