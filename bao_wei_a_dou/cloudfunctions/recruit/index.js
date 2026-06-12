@@ -6,7 +6,7 @@ const db = cloud.database();
 
 const BASIC_UNIT_IDS = ['spear', 'blade', 'bow', 'cavalry'];
 const SPECIAL_CHARS = ['张', '飞', '赵', '云', '刘', '备', '关', '羽', '马', '超', '黄', '忠'];
-const RECRUIT_WEIGHTS = { basic: 80, specialChar: 15, shovel: 5 };
+const RECRUIT_WEIGHTS = { basic: 68, specialChar: 20, shovel: 12 };
 
 exports.main = async function main(event) {
   const roomId = event.roomId;

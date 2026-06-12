@@ -60,6 +60,9 @@ class Game {
     this.room = null;
     this.selfSide = 'A';
     this.launchRoomId = '';
+    this.roomWatcher = null;
+    this.logWatcher = null;
+    this.processedLogIds = {};
 
     this.players = {};
     this.boards = {};
@@ -68,6 +71,7 @@ class Game {
     this.handleTouchStart = this.handleTouchStart.bind(this);
     this.handleTouchMove = this.handleTouchMove.bind(this);
     this.handleTouchEnd = this.handleTouchEnd.bind(this);
+    this.handleKeyboardConfirm = this.handleKeyboardConfirm.bind(this);
     this.loop = this.loop.bind(this);
   }
 
@@ -102,6 +106,9 @@ class Game {
     wx.onTouchStart(this.handleTouchStart);
     wx.onTouchMove(this.handleTouchMove);
     wx.onTouchEnd(this.handleTouchEnd);
+    if (wx.onKeyboardConfirm) {
+      wx.onKeyboardConfirm(this.handleKeyboardConfirm);
+    }
   }
 
   // 切回首页状态，同时清空首页之外的弹窗和按钮缓存。
@@ -109,26 +116,166 @@ class Game {
     this.status = GAME_STATUS.HOME;
     this.buttons = {};
     this.modal = null;
+    this.closeRealtimeWatchers();
   }
 
-  // 创建房间并开始对局。云环境未配置时会走 CloudService 的本地模拟逻辑。
+  // 创建房间。云模式下先进入等待页，等第二名玩家加入后再开始；本地模拟则直接开始。
   async createRoomAndStart() {
-    const room = await this.cloud.createRoom();
-    this.room = room;
-    this.selfSide = room.side || 'A';
-    this.resetLocalGame(room.seed || String(Date.now()));
-    this.status = GAME_STATUS.PLAYING;
-    this.toastMessage('已创建房间，本地先进入对局');
+    try {
+      const room = await this.cloud.createRoom();
+      this.room = room;
+      this.selfSide = room.side || 'A';
+      this.resetLocalGame(room.seed || String(Date.now()));
+
+      if (this.cloud.enabled && room.status === 'waiting') {
+        this.status = GAME_STATUS.ROOM;
+        this.toastMessage('房间已创建，可复制房间号或分享邀请');
+        this.startRoomWatcher();
+        return;
+      }
+
+      this.enterPlayingRoom();
+      this.toastMessage('已创建房间，本地先进入对局');
+    } catch (err) {
+      this.toastMessage(err.message || '创建房间失败');
+      this.audio.play('error');
+    }
   }
 
-  // 加入分享房间并开始对局。当前版本本地模拟对手，后续可替换为真实同步。
-  async joinRoomAndStart() {
-    const room = await this.cloud.joinRoom(this.launchRoomId);
-    this.room = room;
-    this.selfSide = room.side || 'B';
-    this.resetLocalGame(room.seed || String(Date.now()));
+  // 加入房间。roomId 可以来自分享参数，也可以来自用户手动输入的房间号。
+  async joinRoomAndStart(roomId) {
+    const targetRoomId = normalizeRoomId(roomId || this.launchRoomId);
+    if (this.cloud.enabled && !targetRoomId) {
+      this.toastMessage('请输入房间号或通过分享加入');
+      this.audio.play('error');
+      return;
+    }
+
+    try {
+      const room = await this.cloud.joinRoom(targetRoomId);
+      this.room = room;
+      this.selfSide = room.side || 'B';
+      this.resetLocalGame(room.seed || String(Date.now()));
+      this.enterPlayingRoom();
+      this.toastMessage('已加入房间');
+    } catch (err) {
+      this.toastMessage(err.message || '加入房间失败');
+      this.audio.play('error');
+    }
+  }
+
+  // 调起微信小游戏系统键盘，让玩家手动输入房间号加入。
+  showRoomIdKeyboard() {
+    if (!this.cloud.enabled) {
+      this.toastMessage('当前是本地模式，无法通过房间号加入');
+      return;
+    }
+
+    if (!wx.showKeyboard) {
+      this.toastMessage('当前基础库不支持键盘输入');
+      return;
+    }
+
+    this.toastMessage('请输入好友给你的房间号');
+    wx.showKeyboard({
+      defaultValue: '',
+      maxLength: 24,
+      multiple: false,
+      confirmHold: false,
+      confirmType: 'done'
+    });
+  }
+
+  // 键盘确认事件是全局事件，因此只在首页状态下把输入当作房间号处理。
+  handleKeyboardConfirm(event) {
+    if (this.status !== GAME_STATUS.HOME) return;
+    const roomId = normalizeRoomId(event && event.value);
+    if (!roomId) {
+      this.toastMessage('房间号不能为空');
+      return;
+    }
+    if (wx.hideKeyboard) wx.hideKeyboard();
+    this.joinRoomAndStart(roomId);
+  }
+
+  // 进入正式对局，并开启操作日志监听。两个客户端都只监听对方操作。
+  enterPlayingRoom() {
     this.status = GAME_STATUS.PLAYING;
-    this.toastMessage('已加入房间，本地先进入对局');
+    this.processedLogIds = {};
+    this.startRoomWatcher();
+    this.startLogWatcher();
+  }
+
+  // 主动触发微信分享面板，把当前 roomId 带给好友。
+  shareRoom() {
+    if (!this.room || !this.room.roomId || typeof wx === 'undefined' || !wx.shareAppMessage) return;
+    wx.shareAppMessage({
+      title: '来和我一起保卫阿斗',
+      query: `roomId=${this.room.roomId}`
+    });
+  }
+
+  // 复制房间号给用户，方便通过聊天工具手动发给好友。
+  copyRoomId() {
+    if (!this.room || !this.room.roomId) {
+      this.toastMessage('暂无房间号');
+      return;
+    }
+
+    if (!wx.setClipboardData) {
+      this.toastMessage('当前基础库不支持复制');
+      return;
+    }
+
+    wx.setClipboardData({
+      data: this.room.roomId,
+      success: () => {
+        this.toastMessage('房间号已复制');
+        this.audio.play('place');
+      },
+      fail: () => {
+        this.toastMessage('复制失败，请手动记录房间号');
+        this.audio.play('error');
+      }
+    });
+  }
+
+  // 监听房间状态：创建者等到 status=playing 后自动开局；任意端收到 finished 后结束。
+  startRoomWatcher() {
+    if (!this.room || !this.room.roomId || !this.cloud.enabled) return;
+    this.cloud.closeWatcher(this.roomWatcher);
+    this.roomWatcher = this.cloud.watchRoom(this.room.roomId, (room) => {
+      this.room = Object.assign({}, this.room, room);
+      if (this.status === GAME_STATUS.ROOM && room.status === 'playing') {
+        this.enterPlayingRoom();
+        this.toastMessage('好友已加入，开始对局');
+      }
+      if (room.status === 'finished' && this.status !== GAME_STATUS.FINISHED) {
+        this.applyRemoteFinish(room.result || {});
+      }
+    }, () => {
+      this.toastMessage('房间监听失败，请检查数据库权限');
+    });
+  }
+
+  // 监听操作日志，并把对方操作回放到本地 RIVAL 区域。
+  startLogWatcher() {
+    if (!this.room || !this.room.roomId || !this.cloud.enabled) return;
+    this.cloud.closeWatcher(this.logWatcher);
+    this.logWatcher = this.cloud.watchRoomLogs(this.room.roomId, (logs) => {
+      logs
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+        .forEach((log) => this.applyRemoteLog(log));
+    }, () => {
+      this.toastMessage('操作同步失败，请检查 roomLogs 权限');
+    });
+  }
+
+  closeRealtimeWatchers() {
+    this.cloud.closeWatcher(this.roomWatcher);
+    this.cloud.closeWatcher(this.logWatcher);
+    this.roomWatcher = null;
+    this.logWatcher = null;
   }
 
   // 重置一局本地游戏：双方玩家、双方棋盘、拖拽状态和临时提示都会回到初始值。
@@ -146,6 +293,167 @@ class Game {
     this.drag = null;
     this.selectedUnit = null;
     this.toast = null;
+  }
+
+  // 记录玩家低频操作。联网时写入 roomLogs，单机练习时直接忽略。
+  emitAction(type, payload) {
+    if (!this.room || !this.room.roomId || !this.cloud.enabled) return;
+    this.cloud.logAction({
+      roomId: this.room.roomId,
+      playerSide: this.selfSide,
+      type,
+      payload: payload || {}
+    }).catch((err) => {
+      console.warn('log action failed', err);
+      this.toastMessage('同步失败，请检查网络');
+    });
+  }
+
+  // 回放对手操作。注意：本机永远操作 SELF 区域，对手操作永远映射到 RIVAL 区域。
+  applyRemoteLog(log) {
+    const logId = log._id || `${log.type}_${log.createdAt}_${log.playerSide}`;
+    if (this.processedLogIds[logId]) return;
+    this.processedLogIds[logId] = true;
+    if (log.playerSide === this.selfSide) return;
+
+    const payload = log.payload || {};
+    if (log.type === 'RECRUIT') this.applyRemoteRecruit(payload);
+    if (log.type === 'PLACE') this.applyRemotePlace(payload);
+    if (log.type === 'MOVE_TO_BENCH') this.applyRemoteMoveToBench(payload);
+    if (log.type === 'MERGE') this.applyRemoteMerge(payload);
+    if (log.type === 'SWAP') this.applyRemoteSwap(payload);
+    if (log.type === 'SHOVEL') this.applyRemoteShovel(payload);
+    if (log.type === 'PAUSE_REQUEST') this.applyRemotePauseRequest();
+    if (log.type === 'PAUSE_ACCEPT') this.status = GAME_STATUS.PAUSED;
+    if (log.type === 'PAUSE_RESUME') this.status = GAME_STATUS.PLAYING;
+    if (log.type === 'FINISH') this.applyRemoteFinish(payload);
+  }
+
+  applyRemoteRecruit(payload) {
+    const player = this.players[SIDES.RIVAL];
+    const cost = getRecruitCost(player);
+    player.gold = Math.max(0, player.gold - cost);
+    player.recruitCount += 1;
+    player.bench = (payload.items || []).map((item) => createBenchItem(item));
+    this.audio.play('recruit');
+  }
+
+  applyRemotePlace(payload) {
+    const side = SIDES.RIVAL;
+    const unit = this.takeRemoteSourceUnit(payload.source, payload.benchIndex, payload.fromCell, side);
+    if (!unit) return;
+    unit.side = side;
+    unit.cell = cloneCell(payload.cell);
+    this.boards[side].units.push(unit);
+  }
+
+  applyRemoteMoveToBench(payload) {
+    const side = SIDES.RIVAL;
+    const player = this.players[side];
+    const unit = this.findUnitAt(side, payload.fromCell);
+    if (!unit || player.bench[payload.benchIndex]) return;
+    this.boards[side].units = this.boards[side].units.filter((item) => item !== unit);
+    unit.cell = null;
+    player.bench[payload.benchIndex] = unit;
+  }
+
+  applyRemoteShovel(payload) {
+    const side = SIDES.RIVAL;
+    const tile = this.getTile(side, payload.cell);
+    if (tile) tile.type = TILE.BUILD;
+    if (payload.source === 'bench') this.players[side].bench[payload.benchIndex] = null;
+    this.effects.push({ type: 'levelUp', side, cell: cloneCell(payload.cell), life: 0.5 });
+  }
+
+  applyRemoteMerge(payload) {
+    const side = SIDES.RIVAL;
+    const targetUnit = this.findUnitAt(side, payload.targetCell);
+    const sourceUnit = this.takeRemoteSourceUnit(payload.source, payload.benchIndex, payload.fromCell, side, true);
+    if (!targetUnit || !sourceUnit) return;
+
+    if (canMergeBasic(sourceUnit, targetUnit)) {
+      targetUnit.level += 1;
+      this.removeRemoteSourceUnit(sourceUnit, payload.source, payload.benchIndex, side);
+      this.effects.push({ type: 'levelUp', side, cell: cloneCell(targetUnit.cell), life: 0.8 });
+      return;
+    }
+
+    const heroName = getHeroNameFromChars(sourceUnit, targetUnit);
+    if (heroName) {
+      this.removeRemoteSourceUnit(sourceUnit, payload.source, payload.benchIndex, side);
+      this.boards[side].units = this.boards[side].units.filter((unit) => unit !== targetUnit);
+      this.boards[side].units.push(createHeroUnit(heroName, side, targetUnit.cell));
+      this.effects.push({ type: 'heroSkill', side, text: heroName, life: 0.8 });
+    }
+  }
+
+  applyRemoteSwap(payload) {
+    const side = SIDES.RIVAL;
+    const targetUnit = this.findUnitAt(side, payload.targetCell);
+    if (!targetUnit) return;
+
+    if (payload.source === 'board') {
+      const sourceUnit = this.findUnitAt(side, payload.fromCell);
+      if (!sourceUnit) return;
+      sourceUnit.cell = cloneCell(payload.targetCell);
+      targetUnit.cell = cloneCell(payload.fromCell);
+      return;
+    }
+
+    if (payload.source === 'bench') {
+      const item = this.players[side].bench[payload.benchIndex];
+      if (!item) return;
+      const placedUnit = createUnitFromItem(item, side);
+      placedUnit.cell = cloneCell(payload.targetCell);
+      this.players[side].bench[payload.benchIndex] = targetUnit;
+      targetUnit.cell = null;
+      this.boards[side].units = this.boards[side].units.filter((unit) => unit !== targetUnit);
+      this.boards[side].units.push(placedUnit);
+    }
+  }
+
+  takeRemoteSourceUnit(source, benchIndex, fromCell, side, keepOriginal) {
+    if (source === 'bench') {
+      const item = this.players[side].bench[benchIndex];
+      if (!item) return null;
+      if (!keepOriginal) this.players[side].bench[benchIndex] = null;
+      return item.kind === ITEM_KIND.BASIC || item.kind === ITEM_KIND.SPECIAL_CHAR
+        ? createUnitFromItem(item, side)
+        : item;
+    }
+
+    const unit = this.findUnitAt(side, fromCell);
+    if (!unit) return null;
+    if (!keepOriginal) {
+      this.boards[side].units = this.boards[side].units.filter((item) => item !== unit);
+    }
+    return unit;
+  }
+
+  removeRemoteSourceUnit(sourceUnit, source, benchIndex, side) {
+    if (source === 'bench') {
+      this.players[side].bench[benchIndex] = null;
+      return;
+    }
+    this.boards[side].units = this.boards[side].units.filter((unit) => unit !== sourceUnit);
+  }
+
+  applyRemotePauseRequest() {
+    if (this.status !== GAME_STATUS.PLAYING) return;
+    this.status = GAME_STATUS.PAUSED;
+    this.toastMessage('对方请求暂停，已自动同意');
+    this.emitAction('PAUSE_ACCEPT', {});
+  }
+
+  applyRemoteFinish(payload) {
+    if (this.status === GAME_STATUS.FINISHED) return;
+    this.status = GAME_STATUS.FINISHED;
+    const failedSide = payload.failedSide;
+    const selfFailed = failedSide === this.selfSide;
+    this.modal = {
+      title: selfFailed ? '战败' : '获胜',
+      message: selfFailed ? '你的大本营已失守' : '对方大本营已失守'
+    };
   }
 
   // 主循环：计算本帧时间差，更新游戏逻辑，再重绘 Canvas。
@@ -321,11 +629,23 @@ class Game {
     this.status = GAME_STATUS.FINISHED;
     this.audio.play('finish');
     const winner = failedSide === SIDES.SELF ? SIDES.RIVAL : SIDES.SELF;
+    const failedRoomSide = this.toRoomSide(failedSide);
+    const winnerRoomSide = this.toRoomSide(winner);
     this.modal = {
       title: failedSide === SIDES.SELF ? '战败' : '获胜',
       message: winner === SIDES.SELF ? '你坚持到了最后' : '对方坚持到了最后'
     };
-    await this.cloud.finishGame({ failedSide, winner, roomId: this.room && this.room.roomId });
+    this.emitAction('FINISH', { failedSide: failedRoomSide, winner: winnerRoomSide });
+    await this.cloud.finishGame({
+      failedSide: failedRoomSide,
+      winner: winnerRoomSide,
+      roomId: this.room && this.room.roomId
+    });
+  }
+
+  toRoomSide(localSide) {
+    if (localSide === SIDES.SELF) return this.selfSide;
+    return this.selfSide === 'A' ? 'B' : 'A';
   }
 
   // 推进所有己方单位攻击冷却，冷却结束后寻找目标并攻击。
@@ -530,7 +850,7 @@ class Game {
     const result = await this.cloud.recruit({
       roomId: this.room && this.room.roomId,
       seed: this.seed,
-      side,
+      side: this.selfSide,
       recruitCount: player.recruitCount,
       occupiedSpecialChars
     });
@@ -563,6 +883,8 @@ class Game {
 
     if (this.status === GAME_STATUS.HOME) {
       this.drawHome(ctx);
+    } else if (this.status === GAME_STATUS.ROOM) {
+      this.drawRoom(ctx);
     } else {
       this.drawGame(ctx);
     }
@@ -686,20 +1008,46 @@ class Game {
     ctx.fillStyle = COLORS.mutedInk;
     ctx.font = '16px sans-serif';
     ctx.textAlign = 'center';
-    wrapText(ctx, '双人独立防守，征兵合字，守住自己的“斗”。', this.width / 2, 178, this.width - 56, 22);
+    wrapText(ctx, '双人独立防守，征兵合字，守住自己的“斗”', this.width / 2, 178, this.width - 56, 22);
 
-    const createBtn = { x: 58, y: 250, w: this.width - 116, h: 56 };
-    const joinBtn = { x: 58, y: 324, w: this.width - 116, h: 56 };
-    const localBtn = { x: 58, y: 398, w: this.width - 116, h: 56 };
-    this.buttons = { createBtn, joinBtn, localBtn };
+    const createBtn = { x: 58, y: 250, w: this.width - 116, h: 52 };
+    const joinBtn = this.launchRoomId ? { x: 58, y: 316, w: this.width - 116, h: 52 } : null;
+    const roomIdBtn = { x: 58, y: this.launchRoomId ? 382 : 316, w: this.width - 116, h: 52 };
+    const localBtn = { x: 58, y: this.launchRoomId ? 448 : 390, w: this.width - 116, h: 52 };
+    this.buttons = { createBtn, joinBtn, roomIdBtn, localBtn };
     this.drawButton(ctx, createBtn, '创建房间');
-    this.drawButton(ctx, joinBtn, '加入房间');
+    if (joinBtn) this.drawButton(ctx, joinBtn, '加入好友房间');
+    this.drawButton(ctx, roomIdBtn, '输入房间号');
     this.drawButton(ctx, localBtn, '本地练习');
 
     ctx.fillStyle = COLORS.mutedInk;
     ctx.font = '13px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('云环境 ID 未配置时会自动使用本地模拟', this.width / 2, 482);
+    ctx.fillText(this.cloud.enabled ? '云开发已启用，可创建房间或输入房间号加入' : '云环境 ID 未配置时会自动使用本地模拟', this.width / 2, this.launchRoomId ? 544 : 472);
+  }
+
+  // 房间等待页。创建者停留在这里，直到好友通过分享链接加入。
+  drawRoom(ctx) {
+    drawCenteredText(ctx, '等待好友加入', this.width / 2, 142, {
+      font: 'bold 34px serif',
+      color: COLORS.ink,
+      stroke: '#fff7eb',
+      strokeWidth: 5
+    });
+
+    ctx.fillStyle = COLORS.mutedInk;
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`房间号：${this.room ? this.room.roomId : '-'}`, this.width / 2, 194);
+    ctx.fillText('请点击分享，把房间发给好友', this.width / 2, 224);
+
+    const copyBtn = { x: 58, y: 264, w: this.width - 116, h: 52 };
+    const shareBtn = { x: 58, y: 338, w: this.width - 116, h: 52 };
+    const backBtn = { x: 58, y: 412, w: this.width - 116, h: 52 };
+    this.buttons = { copyRoomId: copyBtn, shareRoom: shareBtn, backHome: backBtn };
+    this.drawButton(ctx, copyBtn, '复制房间号');
+    this.drawButton(ctx, shareBtn, '分享邀请');
+    this.drawButton(ctx, backBtn, '返回首页');
   }
 
   // 绘制对局主界面：顶部状态栏、双方棋盘、候选栏、按钮和临时效果。
@@ -1126,15 +1474,27 @@ class Game {
 
     if (this.status === GAME_STATUS.HOME) {
       if (pointInRect(p, this.buttons.createBtn)) this.createRoomAndStart();
-      else if (pointInRect(p, this.buttons.joinBtn)) this.joinRoomAndStart();
+      else if (this.buttons.joinBtn && pointInRect(p, this.buttons.joinBtn)) this.joinRoomAndStart();
+      else if (pointInRect(p, this.buttons.roomIdBtn)) this.showRoomIdKeyboard();
       else if (pointInRect(p, this.buttons.localBtn)) {
+        this.room = null;
+        this.closeRealtimeWatchers();
         this.resetLocalGame();
         this.status = GAME_STATUS.PLAYING;
       }
       return;
     }
 
+    if (this.status === GAME_STATUS.ROOM) {
+      if (pointInRect(p, this.buttons.copyRoomId)) this.copyRoomId();
+      if (pointInRect(p, this.buttons.shareRoom)) this.shareRoom();
+      if (pointInRect(p, this.buttons.backHome)) this.showHome();
+      return;
+    }
+
     if (this.modal && pointInRect(p, this.buttons.modalRestart)) {
+      this.room = null;
+      this.closeRealtimeWatchers();
       this.resetLocalGame();
       this.status = GAME_STATUS.PLAYING;
       this.modal = null;
@@ -1154,6 +1514,10 @@ class Game {
       return;
     }
     if (pointInRect(p, this.layout.resetButton)) {
+      if (this.room && this.cloud.enabled) {
+        this.toastMessage('联网对局暂不支持单方重开');
+        return;
+      }
       this.resetLocalGame();
       this.status = GAME_STATUS.PLAYING;
       return;
@@ -1258,8 +1622,10 @@ class Game {
     const board = this.boards[SIDES.SELF];
     board.units = board.units.filter((item) => item !== unit);
     player.bench[benchIndex] = unit;
+    const fromCell = unit.cell ? cloneCell(unit.cell) : null;
     unit.cell = null;
     this.audio.play('place');
+    this.emitAction('MOVE_TO_BENCH', { fromCell, benchIndex });
   }
 
   // 使用铲子把草地改成可放置的白色建造格。
@@ -1274,6 +1640,11 @@ class Game {
     this.consumeDragSource(drag);
     this.effects.push({ type: 'levelUp', side: SIDES.SELF, cell, life: 0.5 });
     this.audio.play('place');
+    this.emitAction('SHOVEL', {
+      source: drag.source,
+      benchIndex: drag.benchIndex,
+      cell: cloneCell(cell)
+    });
   }
 
   // 把候选栏物品或棋盘单位放到指定建造格。
@@ -1300,6 +1671,12 @@ class Game {
     }
 
     this.audio.play('place');
+    this.emitAction('PLACE', {
+      source: drag.source,
+      benchIndex: drag.benchIndex,
+      fromCell: drag.fromCell ? cloneCell(drag.fromCell) : null,
+      cell: cloneCell(cell)
+    });
   }
 
   // 尝试合成：同兵种同等级基础单位升星；特殊字组合生成武将。
@@ -1307,21 +1684,35 @@ class Game {
     const sourceItem = drag.source === 'board' ? drag.item : createUnitFromItem(drag.item, SIDES.SELF);
 
     if (canMergeBasic(sourceItem, targetUnit)) {
+      const targetCell = cloneCell(targetUnit.cell);
       targetUnit.level += 1;
       this.removeDraggedOriginal(drag);
       this.effects.push({ type: 'levelUp', side: SIDES.SELF, cell: targetUnit.cell, life: 0.8 });
       this.audio.play('merge');
+      this.emitAction('MERGE', {
+        source: drag.source,
+        benchIndex: drag.benchIndex,
+        fromCell: drag.fromCell ? cloneCell(drag.fromCell) : null,
+        targetCell
+      });
       return true;
     }
 
     const heroName = getHeroNameFromChars(sourceItem, targetUnit);
     if (heroName) {
+      const targetCell = cloneCell(targetUnit.cell);
       const hero = createHeroUnit(heroName, SIDES.SELF, targetUnit.cell);
       this.removeDraggedOriginal(drag);
       this.boards[SIDES.SELF].units = this.boards[SIDES.SELF].units.filter((unit) => unit !== targetUnit);
       this.boards[SIDES.SELF].units.push(hero);
       this.effects.push({ type: 'heroSkill', side: SIDES.SELF, text: heroName, life: 0.8 });
       this.audio.play('merge');
+      this.emitAction('MERGE', {
+        source: drag.source,
+        benchIndex: drag.benchIndex,
+        fromCell: drag.fromCell ? cloneCell(drag.fromCell) : null,
+        targetCell
+      });
       return true;
     }
 
@@ -1334,9 +1725,15 @@ class Game {
 
     if (drag.source === 'board') {
       const fromCell = drag.fromCell || drag.item.cell;
+      const targetCell = cloneCell(targetUnit.cell);
       drag.item.cell = { x: targetUnit.cell.x, y: targetUnit.cell.y };
       targetUnit.cell = { x: fromCell.x, y: fromCell.y };
       this.audio.play('place');
+      this.emitAction('SWAP', {
+        source: 'board',
+        fromCell: cloneCell(fromCell),
+        targetCell
+      });
       return true;
     }
 
@@ -1353,6 +1750,11 @@ class Game {
       board.units.push(placedUnit);
       player.bench[drag.benchIndex] = targetUnit;
       this.audio.play('place');
+      this.emitAction('SWAP', {
+        source: 'bench',
+        benchIndex: drag.benchIndex,
+        targetCell: cloneCell(placedUnit.cell)
+      });
       return true;
     }
 
@@ -1378,15 +1780,19 @@ class Game {
   requestPause() {
     if (this.status === GAME_STATUS.PLAYING) {
       this.status = GAME_STATUS.PAUSE_PENDING;
-      this.toastMessage('已请求暂停，本地模拟自动同意');
-      setTimeout(() => {
-        if (this.status === GAME_STATUS.PAUSE_PENDING) this.status = GAME_STATUS.PAUSED;
-      }, 600);
+      this.emitAction('PAUSE_REQUEST', {});
+      this.toastMessage(this.room && this.cloud.enabled ? '已请求暂停，等待对方同意' : '已请求暂停，本地模拟自动同意');
+      if (!this.room || !this.cloud.enabled) {
+        setTimeout(() => {
+          if (this.status === GAME_STATUS.PAUSE_PENDING) this.status = GAME_STATUS.PAUSED;
+        }, 600);
+      }
       return;
     }
 
     if (this.status === GAME_STATUS.PAUSED) {
       this.status = GAME_STATUS.PLAYING;
+      this.emitAction('PAUSE_RESUME', {});
       this.toastMessage('继续游戏');
     }
   }
@@ -1512,6 +1918,17 @@ function createWaveConfig(wave) {
 // 复制候选栏物品，避免直接复用云函数或随机池返回的原对象。
 function createBenchItem(item) {
   return Object.assign({ id: makeId('bench') }, item);
+}
+
+// 复制格子坐标，避免同步 payload 持有游戏对象引用。
+function cloneCell(cell) {
+  if (!cell) return null;
+  return { x: Math.floor(cell.x), y: Math.floor(cell.y) };
+}
+
+// 房间号统一清洗：去掉首尾空格并转大写，兼容用户手动输入小写房间号。
+function normalizeRoomId(roomId) {
+  return String(roomId || '').trim().toUpperCase();
 }
 
 // 把候选栏里的基础单位或特殊字转成棋盘上的单位对象。

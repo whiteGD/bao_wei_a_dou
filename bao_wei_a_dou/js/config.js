@@ -3,10 +3,10 @@
  * 当前数值来自产品PRD.md，部分未完全确认的内容按 PRD 建议值落地。
  */
 
-const APP_ID = 'wxad2cd200f883d60e';
+const APP_ID = '';
 
 // 云开发环境 ID 还未提供。填入真实环境 ID 后，CloudService 会自动优先调用云函数。
-const CLOUD_ENV_ID = '';
+const CLOUD_ENV_ID = 'cloud1-d4gchjamq29fc8ca7';
 
 // 双方阵营标识。SELF 是本机玩家视角，RIVAL 是对手视角。
 const SIDES = {

@@ -12,6 +12,7 @@ class CloudService {
     this.enabled = false;
     this.localRoom = null;
     this.localSeq = 0;
+    this.db = null;
   }
 
   // 初始化微信云开发。没有配置 CLOUD_ENV_ID 时，自动降级为本地模拟模式。
@@ -25,6 +26,7 @@ class CloudService {
       env: CLOUD_ENV_ID,
       traceUser: true
     });
+    this.db = wx.cloud.database();
     this.enabled = true;
   }
 
@@ -76,6 +78,59 @@ class CloudService {
       return this.callFunction('finishGame', payload);
     }
     return { ok: true, payload };
+  }
+
+  // 监听房间状态。创建者会用它等待第二名玩家加入，并监听对局结束等房间级变化。
+  watchRoom(roomId, onChange, onError) {
+    if (!this.enabled || !roomId || !this.db || !this.db.collection('rooms').where) {
+      return null;
+    }
+
+    return this.db.collection('rooms')
+      .where({ roomId })
+      .watch({
+        onChange: (snapshot) => {
+          const room = snapshot.docs && snapshot.docs[0];
+          if (room) onChange(room);
+        },
+        onError: onError || ((err) => console.warn('watch room error', err))
+      });
+  }
+
+  // 监听房间操作日志。客户端只回放对方操作，自己的操作由本地立即应用。
+  watchRoomLogs(roomId, onLogs, onError) {
+    if (!this.enabled || !roomId || !this.db || !this.db.collection('roomLogs').where) {
+      return null;
+    }
+
+    return this.db.collection('roomLogs')
+      .where({ roomId })
+      .watch({
+        onChange: (snapshot) => {
+          const logs = snapshot.docChanges
+            .filter((change) => change.dataType === 'add')
+            .map((change) => change.doc);
+          if (logs.length > 0) onLogs(logs);
+        },
+        onError: onError || ((err) => console.warn('watch logs error', err))
+      });
+  }
+
+  // 追加玩家操作日志。这里直接写数据库，是为了让放置/合成/铲子这类低频操作延迟更低。
+  async logAction(payload) {
+    if (!this.enabled || !payload.roomId || !this.db) {
+      this.localSeq += 1;
+      return { ok: true, seq: this.localSeq };
+    }
+
+    return this.callFunction('logAction', payload);
+  }
+
+  // 客户端退出或重新开始前关闭监听，避免旧房间事件继续影响新对局。
+  closeWatcher(watcher) {
+    if (watcher && watcher.close) {
+      watcher.close();
+    }
   }
 
   // 微信云函数通用调用封装，统一返回 res.result。
