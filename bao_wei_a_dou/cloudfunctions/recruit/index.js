@@ -21,7 +21,7 @@ exports.main = async function main(event) {
   for (let i = 0; i < 5; i += 1) {
     const roll = rng.next() * 100;
     if (roll < RECRUIT_WEIGHTS.basic) {
-      items.push({ kind: 'basic', unitId: rng.pick(BASIC_UNIT_IDS), level: 1 });
+      items.push({ id: `${seed}_slot${i}_basic`, kind: 'basic', unitId: rng.pick(BASIC_UNIT_IDS), level: 1 });
       continue;
     }
 
@@ -33,14 +33,14 @@ exports.main = async function main(event) {
       if (pool.length > 0) {
         const char = rng.pick(pool);
         usedSpecialInRound[char] = true;
-        items.push({ kind: 'specialChar', char });
+        items.push({ id: `${seed}_slot${i}_char_${char}`, kind: 'specialChar', char });
       } else {
-        items.push({ kind: 'basic', unitId: rng.pick(BASIC_UNIT_IDS), level: 1 });
+        items.push({ id: `${seed}_slot${i}_fallback`, kind: 'basic', unitId: rng.pick(BASIC_UNIT_IDS), level: 1 });
       }
       continue;
     }
 
-    items.push({ kind: 'shovel' });
+    items.push({ id: `${seed}_slot${i}_shovel`, kind: 'shovel' });
   }
 
   if (roomId) {

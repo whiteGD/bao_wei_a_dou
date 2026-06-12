@@ -15,6 +15,8 @@ exports.main = async function main(event) {
     status: 'waiting',
     mode: 'duel',
     seed,
+    battleStartAt: 0,
+    states: {},
     players: [
       {
         openid: wxContext.OPENID,
@@ -42,6 +44,7 @@ exports.main = async function main(event) {
     roomId,
     side: 'A',
     seed,
+    battleStartAt: 0,
     status: room.status
   };
 };

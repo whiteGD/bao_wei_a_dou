@@ -69,6 +69,13 @@ class CloudService {
     return { ok: true, payload };
   }
 
+  async updateState(payload) {
+    if (!this.enabled || !payload.roomId) {
+      return { ok: true };
+    }
+    return this.callFunction('updateState', payload);
+  }
+
   async getRoom(roomId) {
     if (!this.enabled || !roomId || !this.db) return null;
     const result = await this.db.collection('rooms').where({ roomId }).limit(1).get();
@@ -147,7 +154,7 @@ function createRecruitItems(payload) {
     const roll = rng.next() * 100;
     if (roll < RECRUIT_WEIGHTS.basic) {
       const unitId = rng.pick(BASIC_UNIT_IDS);
-      items.push({ kind: ITEM_KIND.BASIC, unitId, level: 1 });
+      items.push({ id: `${seed}_slot${i}_basic`, kind: ITEM_KIND.BASIC, unitId, level: 1 });
       continue;
     }
 
@@ -159,15 +166,15 @@ function createRecruitItems(payload) {
       if (pool.length > 0) {
         const char = rng.pick(pool);
         usedSpecialInRound[char] = true;
-        items.push({ kind: ITEM_KIND.SPECIAL_CHAR, char });
+        items.push({ id: `${seed}_slot${i}_char_${char}`, kind: ITEM_KIND.SPECIAL_CHAR, char });
       } else {
         const unitId = rng.pick(BASIC_UNIT_IDS);
-        items.push({ kind: ITEM_KIND.BASIC, unitId, level: 1 });
+        items.push({ id: `${seed}_slot${i}_fallback`, kind: ITEM_KIND.BASIC, unitId, level: 1 });
       }
       continue;
     }
 
-    items.push({ kind: ITEM_KIND.SHOVEL });
+    items.push({ id: `${seed}_slot${i}_shovel`, kind: ITEM_KIND.SHOVEL });
   }
 
   return items;
