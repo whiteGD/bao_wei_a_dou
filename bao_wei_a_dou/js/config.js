@@ -109,7 +109,7 @@ const BASIC_UNITS = {
     kind: ITEM_KIND.BASIC,
     role: '近战单体',
     attackType: 'single',
-    range: 1,
+    range: 1.5,
     levels: [
       { attack: 3, attackSpeed: 1.25 },
       { attack: 4.5, attackSpeed: 1.88 },
@@ -124,7 +124,7 @@ const BASIC_UNITS = {
     kind: ITEM_KIND.BASIC,
     role: '范围伤害',
     attackType: 'area',
-    range: 2,
+    range: 2.1,
     levels: [
       { attack: 2, attackSpeed: 1.25 },
       { attack: 3, attackSpeed: 1.88 },
@@ -139,7 +139,7 @@ const BASIC_UNITS = {
     kind: ITEM_KIND.BASIC,
     role: '直线贯穿',
     attackType: 'pierce',
-    range: 3,
+    range: 2.5,
     levels: [
       { attack: 2, attackSpeed: 1.25 },
       { attack: 3, attackSpeed: 1.88 },
@@ -154,7 +154,7 @@ const BASIC_UNITS = {
     kind: ITEM_KIND.BASIC,
     role: '远程单体',
     attackType: 'single',
-    range: 4,
+    range: 3.5,
     levels: [
       { attack: 2, attackSpeed: 1.25 },
       { attack: 3, attackSpeed: 1.88 },
