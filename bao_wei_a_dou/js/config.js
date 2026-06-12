@@ -8,11 +8,13 @@ const APP_ID = 'wxad2cd200f883d60e';
 // 云开发环境 ID 还未提供。填入真实环境 ID 后，CloudService 会自动优先调用云函数。
 const CLOUD_ENV_ID = '';
 
+// 双方阵营标识。SELF 是本机玩家视角，RIVAL 是对手视角。
 const SIDES = {
   SELF: 'self',
   RIVAL: 'rival'
 };
 
+// 棋盘格子类型：草地不可放置，白色建造格可放单位，路径走敌人，基地是终点。
 const TILE = {
   GRASS: 'grass',
   BUILD: 'build',
@@ -20,6 +22,8 @@ const TILE = {
   BASE: 'base'
 };
 
+// 候选栏和棋盘上物品的类型。
+// BASIC 是基础兵种，SPECIAL_CHAR 是武将合成字，HERO 是已合成武将，SHOVEL 是开地道具。
 const ITEM_KIND = {
   BASIC: 'basic',
   SPECIAL_CHAR: 'specialChar',
@@ -27,6 +31,7 @@ const ITEM_KIND = {
   SHOVEL: 'shovel'
 };
 
+// 游戏流程状态。触摸、更新和绘制都会根据状态走不同逻辑。
 const GAME_STATUS = {
   HOME: 'home',
   ROOM: 'room',
@@ -80,15 +85,20 @@ const PLAYER_DEFAULTS = {
   benchSize: 5
 };
 
+// 征兵池权重，总和按 100 理解：基础兵最多，特殊字少量，铲子最少。
 const RECRUIT_WEIGHTS = {
   basic: 80,
   specialChar: 15,
   shovel: 5
 };
 
+// 基础兵种 ID 列表，用于随机征兵和从配置表里取具体数值。
 const BASIC_UNIT_IDS = ['spear', 'blade', 'bow', 'cavalry'];
+
+// 特殊字池。两个指定的字可以合成一个对应武将。
 const SPECIAL_CHARS = ['张', '飞', '赵', '云', '刘', '备', '关', '羽', '马', '超', '黄', '忠'];
 
+// 基础兵种配置：文字、定位、攻击类型、射程和 1-5 级成长数值。
 const BASIC_UNITS = {
   blade: {
     id: 'blade',
@@ -152,6 +162,7 @@ const BASIC_UNITS = {
   }
 };
 
+// 武将合成配方：候选栏或棋盘上两个特殊字相遇时，按这里决定生成哪个武将。
 const HERO_PAIRS = {
   张飞: ['张', '飞'],
   赵云: ['赵', '云'],
@@ -161,6 +172,7 @@ const HERO_PAIRS = {
   黄忠: ['黄', '忠']
 };
 
+// 武将基础配置。baseType 决定大致定位，skill 决定在 tryHeroSkill 里触发的技能逻辑。
 const HERO_CONFIGS = {
   张飞: { text: '张飞', baseType: 'blade', attack: 8, attackSpeed: 1.1, range: 1, skill: 'roar' },
   赵云: { text: '赵云', baseType: 'spear', attack: 6, attackSpeed: 1.25, range: 3, skill: 'combo' },
@@ -170,6 +182,7 @@ const HERO_CONFIGS = {
   黄忠: { text: '黄忠', baseType: 'bow', attack: 6, attackSpeed: 1.25, range: 4, skill: 'arrowRain' }
 };
 
+// 武将等级成长倍率。最终属性 = 武将基础属性 * 当前等级倍率。
 const HERO_GROWTH = [
   { attackRate: 1, speedRate: 1 },
   { attackRate: 1.5, speedRate: 1.3 },
@@ -178,8 +191,10 @@ const HERO_GROWTH = [
   { attackRate: 3.75, speedRate: 2.7 }
 ];
 
+// 武将升级所需经验。数组下标对应“升到下一等级”的门槛。
 const HERO_EXP_NEEDS = [10, 35, 75, 130];
 
+// 敌方大将波次效果配置。每 5 波会抽一个大将，并触发对应干扰效果。
 const GENERALS = [
   { name: '吕布', skillText: '基础单位攻击降低', type: 'attackDown' },
   { name: '司马懿', skillText: '基础单位攻速降低', type: 'speedDown' },
@@ -187,6 +202,7 @@ const GENERALS = [
   { name: '曹操', skillText: '敌人护甲提升', type: 'armorUp' }
 ];
 
+// 统一颜色表。渲染代码只引用这里，后续换主题时集中调整。
 const COLORS = {
   bg: '#eee1cf',
   ink: '#241915',

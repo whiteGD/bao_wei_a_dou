@@ -14,6 +14,7 @@ class CloudService {
     this.localSeq = 0;
   }
 
+  // 初始化微信云开发。没有配置 CLOUD_ENV_ID 时，自动降级为本地模拟模式。
   init() {
     if (typeof wx === 'undefined' || !wx.cloud || !CLOUD_ENV_ID) {
       this.enabled = false;
@@ -27,6 +28,7 @@ class CloudService {
     this.enabled = true;
   }
 
+  // 创建房间。云模式调用云函数，本地模式返回一个模拟房间对象。
   async createRoom() {
     if (this.enabled) {
       return this.callFunction('createRoom', {});
@@ -41,6 +43,7 @@ class CloudService {
     return this.localRoom;
   }
 
+  // 加入房间。当前本地模式只保留 roomId 和随机种子，方便先测试玩法流程。
   async joinRoom(roomId) {
     if (this.enabled) {
       return this.callFunction('joinRoom', { roomId });
@@ -55,6 +58,7 @@ class CloudService {
     return this.localRoom;
   }
 
+  // 征兵入口。云模式交给云函数，本地模式用同一套随机规则生成 5 个候选项。
   async recruit(payload) {
     if (this.enabled) {
       return this.callFunction('recruit', payload);
@@ -66,6 +70,7 @@ class CloudService {
     };
   }
 
+  // 结束游戏入口。云模式可记录结算，本地模式只返回成功结果。
   async finishGame(payload) {
     if (this.enabled) {
       return this.callFunction('finishGame', payload);
@@ -73,6 +78,7 @@ class CloudService {
     return { ok: true, payload };
   }
 
+  // 微信云函数通用调用封装，统一返回 res.result。
   callFunction(name, data) {
     return new Promise((resolve, reject) => {
       wx.cloud.callFunction({

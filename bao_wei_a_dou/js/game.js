@@ -69,6 +69,7 @@ class Game {
     this.loop = this.loop.bind(this);
   }
 
+  // 游戏启动入口：初始化云服务、读取分享参数、绑定触摸事件，并进入首页循环。
   start() {
     this.cloud.init();
     this.readLaunchOptions();
@@ -87,24 +88,28 @@ class Game {
     this.loop();
   }
 
+  // 读取微信启动参数。通过分享链接进入房间时，roomId 会放在 query 里。
   readLaunchOptions() {
     if (typeof wx === 'undefined' || !wx.getLaunchOptionsSync) return;
     const options = wx.getLaunchOptionsSync();
     this.launchRoomId = options && options.query && options.query.roomId ? options.query.roomId : '';
   }
 
+  // 统一绑定微信触摸事件，后续所有点击、拖拽都从这三个入口分发。
   bindEvents() {
     wx.onTouchStart(this.handleTouchStart);
     wx.onTouchMove(this.handleTouchMove);
     wx.onTouchEnd(this.handleTouchEnd);
   }
 
+  // 切回首页状态，同时清空首页之外的弹窗和按钮缓存。
   showHome() {
     this.status = GAME_STATUS.HOME;
     this.buttons = {};
     this.modal = null;
   }
 
+  // 创建房间并开始对局。云环境未配置时会走 CloudService 的本地模拟逻辑。
   async createRoomAndStart() {
     const room = await this.cloud.createRoom();
     this.room = room;
@@ -114,6 +119,7 @@ class Game {
     this.toastMessage('已创建房间，本地先进入对局');
   }
 
+  // 加入分享房间并开始对局。当前版本本地模拟对手，后续可替换为真实同步。
   async joinRoomAndStart() {
     const room = await this.cloud.joinRoom(this.launchRoomId);
     this.room = room;
@@ -123,6 +129,7 @@ class Game {
     this.toastMessage('已加入房间，本地先进入对局');
   }
 
+  // 重置一局本地游戏：双方玩家、双方棋盘、拖拽状态和临时提示都会回到初始值。
   resetLocalGame(seed) {
     this.seed = seed || String(Date.now());
     this.players = {
@@ -138,6 +145,7 @@ class Game {
     this.toast = null;
   }
 
+  // 主循环：计算本帧时间差，更新游戏逻辑，再重绘 Canvas。
   loop() {
     const frameAt = now();
     const dt = clamp((frameAt - this.lastFrameAt) / 1000, 0, 0.05);
@@ -155,6 +163,7 @@ class Game {
     raf(this.loop);
   }
 
+  // 每帧更新入口。只有 PLAYING 状态会推进双方战斗，其余状态只更新提示和特效。
   update(dt) {
     if (this.status === GAME_STATUS.PLAYING) {
       this.updateSide(SIDES.SELF, dt);
@@ -173,6 +182,7 @@ class Game {
     }
   }
 
+  // 更新某一方的完整战斗状态：开波、出怪、单位攻击、检查波次结束。
   updateSide(side, dt) {
     const board = this.boards[side];
     const player = this.players[side];
@@ -188,6 +198,7 @@ class Game {
     this.checkWaveEnd(side);
   }
 
+  // 开始新一波敌人，并在大将波触发前置提示和全局干扰效果。
   startWave(side) {
     const board = this.boards[side];
     board.wave += 1;
@@ -204,12 +215,14 @@ class Game {
     }
   }
 
+  // 显示敌方大将提示。side 决定提示文案里显示“我方”还是“对方”。
   showGeneralWarning(side, general) {
     const label = side === SIDES.SELF ? '我方遭遇' : '对方遭遇';
     this.toastMessage(`${label}${general.name}：${general.skillText}`);
     this.audio.play('warning');
   }
 
+  // 应用大将带来的干扰效果，比如封格、降攻速、加敌人护甲。
   applyGeneralSkill(side, general) {
     const board = this.boards[side];
 
@@ -232,6 +245,7 @@ class Game {
     if (general.type === 'armorUp') board.debuff.armorUp = 2;
   }
 
+  // 推进敌人生成和移动。敌人走到路径终点后会扣对应玩家血量。
   updateEnemies(side, dt) {
     const board = this.boards[side];
     if (board.waveActive && board.spawnedInWave < board.waveConfig.enemyCount) {
@@ -264,6 +278,7 @@ class Game {
     }
   }
 
+  // 生成普通敌人或大将敌人。大将拥有更高血量和护甲。
   spawnEnemy(side, isGeneral) {
     const board = this.boards[side];
     const cfg = board.waveConfig;
@@ -285,6 +300,7 @@ class Game {
     });
   }
 
+  // 基地受伤处理。血量归零时结束游戏。
   damageBase(side) {
     const player = this.players[side];
     player.hp -= 1;
@@ -296,6 +312,7 @@ class Game {
     }
   }
 
+  // 结束对局，展示结果弹窗，并通知云服务记录结算。
   async finishGame(failedSide) {
     if (this.status === GAME_STATUS.FINISHED) return;
     this.status = GAME_STATUS.FINISHED;
@@ -308,6 +325,7 @@ class Game {
     await this.cloud.finishGame({ failedSide, winner, roomId: this.room && this.room.roomId });
   }
 
+  // 推进所有己方单位攻击冷却，冷却结束后寻找目标并攻击。
   updateUnits(side, dt) {
     const board = this.boards[side];
     board.units.forEach((unit) => {
@@ -323,6 +341,7 @@ class Game {
     });
   }
 
+  // 根据单位射程和攻击类型筛选目标。普通单体只取第一个，范围和穿透会返回多个。
   findTargetsForUnit(side, unit) {
     const board = this.boards[side];
     const stats = getUnitStats(unit);
@@ -356,6 +375,7 @@ class Game {
     return [enemiesInRange[0]];
   }
 
+  // 对目标造成伤害，播放攻击反馈，并处理武将技能和敌人死亡。
   attackTargets(side, unit, targets) {
     const stats = getUnitStats(unit);
     const board = this.boards[side];
@@ -383,6 +403,7 @@ class Game {
     this.audio.play('attack');
   }
 
+  // 武将技能触发逻辑。每个武将根据名字走不同技能分支。
   tryHeroSkill(side, unit, target) {
     if (unit.kind !== ITEM_KIND.HERO || !target) return;
     if (unit.skillCooldown > 0) return;
@@ -437,6 +458,7 @@ class Game {
     }
   }
 
+  // 移除死亡敌人，给玩家加金币；如果击杀者是武将，还会增加武将经验。
   removeDeadEnemies(side, killer) {
     const board = this.boards[side];
     const player = this.players[side];
@@ -454,6 +476,7 @@ class Game {
     }
   }
 
+  // 给武将加经验并处理连续升级。满级后不再获得等级提升。
   addHeroExp(unit, exp) {
     if (unit.level >= 5) return;
     unit.exp += exp;
@@ -465,6 +488,7 @@ class Game {
     }
   }
 
+  // 判断当前波次是否已经完全结束，并为下一波设置倒计时。
   checkWaveEnd(side) {
     const board = this.boards[side];
     if (!board.waveActive) return;
@@ -477,6 +501,7 @@ class Game {
     board.debuff = {};
   }
 
+  // 根据敌人在路径上的进度，换算成棋盘上的连续坐标，方便移动和攻击判定。
   enemyCell(enemy) {
     const index = clamp(Math.floor(enemy.pathProgress), 0, BOARD.path.length - 1);
     const nextIndex = clamp(index + 1, 0, BOARD.path.length - 1);
@@ -527,6 +552,7 @@ class Game {
     return Object.keys(chars);
   }
 
+  // 总渲染入口。每一帧先计算布局，再按当前状态绘制首页或对局画面。
   render() {
     this.computeLayout();
     const ctx = this.ctx;
@@ -544,6 +570,7 @@ class Game {
     if (this.drag) this.drawDraggedItem(ctx);
   }
 
+  // 根据当前屏幕尺寸计算棋盘、按钮、候选栏等区域，避免绘制和触摸判定各算一套。
   computeLayout() {
     const margin = 18;
     const boardW = Math.min(this.width - margin * 2, 360);
@@ -578,6 +605,7 @@ class Game {
     };
   }
 
+  // 绘制整体背景，包括底色、山线和水纹。这里不再使用 image.png 参考图。
   drawBackground(ctx) {
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, this.width, this.height);
@@ -644,6 +672,7 @@ class Game {
     ctx.restore();
   }
 
+  // 绘制首页：标题、说明和创建/加入/本地练习按钮。
   drawHome(ctx) {
     drawCenteredText(ctx, '保卫阿斗', this.width / 2, 132, {
       font: 'bold 42px serif',
@@ -671,6 +700,7 @@ class Game {
     ctx.fillText('云环境 ID 未配置时会自动使用本地模拟', this.width / 2, 482);
   }
 
+  // 绘制对局主界面：顶部状态栏、双方棋盘、候选栏、按钮和临时效果。
   drawGame(ctx) {
     this.buttons = {
       pause: this.layout.pauseButton,
@@ -688,6 +718,7 @@ class Game {
     this.drawEffects(ctx);
   }
 
+  // 绘制顶部资源和状态信息，包括血量、金币、波次、静音等按钮。
   drawTopBar(ctx) {
     this.drawIconButton(ctx, this.layout.pauseButton, this.status === GAME_STATUS.PAUSED ? '▶' : 'Ⅱ');
     this.drawIconButton(ctx, this.layout.resetButton, '↻');
@@ -711,6 +742,7 @@ class Game {
     }
   }
 
+  // 绘制单方棋盘。small=true 时用于对手小棋盘，false 时用于本方主棋盘。
   drawBoard(ctx, side, small) {
     const l = this.layout;
     const cell = small ? l.rivalCell : l.cell;
@@ -754,6 +786,7 @@ class Game {
     ctx.restore();
   }
 
+  // 绘制一个单位或武将，并根据等级、经验展示边框和进度信息。
   drawUnit(ctx, unit, side, small) {
     const cell = small ? this.layout.rivalCell : this.layout.cell;
     const pos = this.cellToPixel(unit.cell, side, small);
@@ -782,6 +815,7 @@ class Game {
     ctx.restore();
   }
 
+  // 绘制敌人或大将，包括血条和在路径上的当前位置。
   drawEnemy(ctx, enemy, side, small) {
     const cell = small ? this.layout.rivalCell : this.layout.cell;
     const logical = this.enemyCell(enemy);
@@ -811,6 +845,7 @@ class Game {
     ctx.restore();
   }
 
+  // 绘制候选栏。征兵获得的单位、特殊字、铲子都会先放在这里。
   drawBench(ctx) {
     const player = this.players[SIDES.SELF];
     const y = this.layout.benchY;
@@ -837,6 +872,7 @@ class Game {
     }
   }
 
+  // 绘制征兵按钮，并根据金币是否足够显示可用/不可用状态。
   drawRecruitButton(ctx) {
     const player = this.players[SIDES.SELF];
     const cost = getRecruitCost(player);
@@ -849,6 +885,7 @@ class Game {
     });
   }
 
+  // 通用文字按钮绘制方法。
   drawButton(ctx, rect, text, disabled) {
     ctx.save();
     ctx.fillStyle = disabled ? '#9d8d7e' : COLORS.button;
@@ -866,6 +903,7 @@ class Game {
     ctx.restore();
   }
 
+  // 顶部小图标按钮绘制方法。
   drawIconButton(ctx, rect, text) {
     ctx.save();
     ctx.fillStyle = COLORS.panel;
@@ -881,6 +919,7 @@ class Game {
     ctx.restore();
   }
 
+  // 绘制伤害、金币、升级、封格等短生命周期特效。
   drawEffects(ctx) {
     this.effects.forEach((effect) => {
       ctx.save();
@@ -927,6 +966,7 @@ class Game {
     });
   }
 
+  // 绘制顶部临时提示条。
   drawToast(ctx) {
     const text = this.toast.text;
     const w = Math.min(this.width - 56, 260);
@@ -944,6 +984,7 @@ class Game {
     ctx.restore();
   }
 
+  // 绘制结算弹窗和弹窗按钮。
   drawModal(ctx) {
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
@@ -969,6 +1010,7 @@ class Game {
     ctx.restore();
   }
 
+  // 拖拽过程中绘制跟随手指移动的单位/道具预览。
   drawDraggedItem(ctx) {
     const item = this.drag.item;
     ctx.save();
@@ -987,6 +1029,7 @@ class Game {
     ctx.restore();
   }
 
+  // 触摸开始：负责首页按钮、顶部按钮、征兵按钮，以及从候选栏/棋盘开始拖拽。
   handleTouchStart(event) {
     const p = getTouchPoint(event);
     if (!p) return;
@@ -1052,6 +1095,7 @@ class Game {
     }
   }
 
+  // 触摸移动：如果正在拖拽，就更新拖拽物体的屏幕坐标。
   handleTouchMove(event) {
     if (!this.drag) return;
     const p = getTouchPoint(event);
@@ -1060,6 +1104,7 @@ class Game {
     this.drag.y = p.y;
   }
 
+  // 触摸结束：停止拖拽，并把拖拽物交给 dropDraggedItem 判断落点行为。
   handleTouchEnd(event) {
     if (!this.drag) return;
     const p = getTouchPoint(event) || { x: this.drag.x, y: this.drag.y };
@@ -1068,6 +1113,7 @@ class Game {
     this.dropDraggedItem(drag, p);
   }
 
+  // 根据拖拽物落点决定行为：放回候选栏、使用铲子、合成或放置单位。
   dropDraggedItem(drag, point) {
     const benchIndex = this.getBenchIndexAt(point);
     if (benchIndex !== -1 && drag.source === 'board') {
@@ -1094,6 +1140,7 @@ class Game {
     this.placeUnit(drag, cell);
   }
 
+  // 把棋盘上的单位移动回候选栏指定格子。
   moveUnitToBench(unit, benchIndex) {
     const player = this.players[SIDES.SELF];
     if (player.bench[benchIndex]) {
@@ -1108,6 +1155,7 @@ class Game {
     this.audio.play('place');
   }
 
+  // 使用铲子把草地改成可放置的白色建造格。
   useShovel(drag, cell) {
     const tile = this.getTile(SIDES.SELF, cell);
     if (!tile || tile.type !== TILE.GRASS) {
@@ -1121,6 +1169,7 @@ class Game {
     this.audio.play('place');
   }
 
+  // 把候选栏物品或棋盘单位放到指定建造格。
   placeUnit(drag, cell) {
     const tile = this.getTile(SIDES.SELF, cell);
     if (!tile || tile.type !== TILE.BUILD) {
@@ -1146,6 +1195,7 @@ class Game {
     this.audio.play('place');
   }
 
+  // 尝试合成：同兵种同等级基础单位升星；特殊字组合生成武将。
   tryMergeUnits(drag, targetUnit) {
     const sourceItem = drag.source === 'board' ? drag.item : createUnitFromItem(drag.item, SIDES.SELF);
 
@@ -1171,6 +1221,7 @@ class Game {
     return false;
   }
 
+  // 合成成功后清理被拖拽的原物体，避免棋盘或候选栏残留重复对象。
   removeDraggedOriginal(drag) {
     if (drag.source === 'bench') {
       this.players[SIDES.SELF].bench[drag.benchIndex] = null;
@@ -1180,10 +1231,12 @@ class Game {
     this.boards[SIDES.SELF].units = this.boards[SIDES.SELF].units.filter((unit) => unit !== drag.item);
   }
 
+  // 消耗候选栏来源的拖拽物，主要给铲子这类一次性道具使用。
   consumeDragSource(drag) {
     if (drag.source === 'bench') this.players[SIDES.SELF].bench[drag.benchIndex] = null;
   }
 
+  // 暂停/继续逻辑。当前版本本地模拟双方同意暂停。
   requestPause() {
     if (this.status === GAME_STATUS.PLAYING) {
       this.status = GAME_STATUS.PAUSE_PENDING;
@@ -1200,10 +1253,12 @@ class Game {
     }
   }
 
+  // 显示短文本提示，超过时间后 update 会自动清理。
   toastMessage(text) {
     this.toast = { text, until: now() + 1800 };
   }
 
+  // 根据触摸点判断点中了候选栏第几个格子，没点中返回 -1。
   getBenchIndexAt(point) {
     const y = this.layout.benchY;
     const cell = this.layout.benchCell;
@@ -1215,10 +1270,12 @@ class Game {
     return -1;
   }
 
+  // 读取某一方棋盘上的格子数据。
   getTile(side, cell) {
     return this.boards[side].tiles.get(cellKey({ x: Math.floor(cell.x), y: Math.floor(cell.y) }));
   }
 
+  // 查找某一方指定格子上的单位。
   findUnitAt(side, cell) {
     return this.boards[side].units.find((unit) => unit.cell && sameCell(unit.cell, {
       x: Math.floor(cell.x),
@@ -1226,6 +1283,7 @@ class Game {
     }));
   }
 
+  // 棋盘坐标转屏幕像素坐标。side/small 决定使用哪一块棋盘布局。
   cellToPixel(cell, side, small) {
     const l = this.layout;
     const size = small ? l.rivalCell : l.cell;
@@ -1237,6 +1295,7 @@ class Game {
     return { x: x0 + x * size, y: y0 + y * size };
   }
 
+  // 屏幕像素坐标转棋盘格子坐标，用于触摸落点判断。
   pixelToCell(point, side, small) {
     const l = this.layout;
     const size = small ? l.rivalCell : l.cell;
@@ -1253,6 +1312,7 @@ class Game {
   }
 }
 
+// 创建玩家状态。这里保存血量、金币、征兵次数和候选栏内容。
 function createPlayerState(side) {
   return {
     side,
@@ -1263,6 +1323,7 @@ function createPlayerState(side) {
   };
 }
 
+// 创建某一方的棋盘状态，包含格子、单位、敌人、波次计时和大将干扰状态。
 function createBoardState(side) {
   const tiles = new Map();
   for (let y = 0; y < BOARD.rows; y += 1) {
@@ -1295,6 +1356,7 @@ function createBoardState(side) {
   };
 }
 
+// 根据波次数生成敌人数量、血量、速度、护甲和是否出现大将。
 function createWaveConfig(wave) {
   const general = wave > 0 && wave % 6 === 0 ? GENERALS[(wave / 6 - 1) % GENERALS.length] : null;
   return {
@@ -1309,10 +1371,12 @@ function createWaveConfig(wave) {
   };
 }
 
+// 复制候选栏物品，避免直接复用云函数或随机池返回的原对象。
 function createBenchItem(item) {
   return Object.assign({ id: makeId('bench') }, item);
 }
 
+// 把候选栏里的基础单位或特殊字转成棋盘上的单位对象。
 function createUnitFromItem(item, side) {
   if (item.kind === ITEM_KIND.BASIC) {
     const cfg = BASIC_UNITS[item.unitId];
@@ -1347,6 +1411,7 @@ function createUnitFromItem(item, side) {
   return item;
 }
 
+// 创建武将单位。武将属性来自 HERO_CONFIGS，等级和经验从 1 级 0 经验开始。
 function createHeroUnit(heroName, side, cell) {
   const cfg = HERO_CONFIGS[heroName];
   return {
@@ -1364,6 +1429,7 @@ function createHeroUnit(heroName, side, cell) {
   };
 }
 
+// 计算单位当前真实属性。基础单位读 levels，武将读基础配置和成长倍率。
 function getUnitStats(unit) {
   if (unit.kind === ITEM_KIND.HERO) {
     const cfg = HERO_CONFIGS[unit.heroName];
@@ -1389,10 +1455,12 @@ function getUnitStats(unit) {
   return { attack: 0, attackSpeed: 1, range: 0 };
 }
 
+// 根据玩家已征兵次数计算本次征兵价格。
 function getRecruitCost(player) {
   return PLAYER_DEFAULTS.recruitBaseCost + player.recruitCount * PLAYER_DEFAULTS.recruitCostStep;
 }
 
+// 获取候选栏或棋盘单位展示用的文字。
 function getItemText(item) {
   if (!item) return '';
   if (item.kind === ITEM_KIND.SHOVEL) return '铲';
@@ -1402,6 +1470,7 @@ function getItemText(item) {
   return item.text || '';
 }
 
+// 判断两个基础单位是否可以合成：同类型、同等级、未满 5 级。
 function canMergeBasic(source, target) {
   return source.kind === ITEM_KIND.BASIC
     && target.kind === ITEM_KIND.BASIC
@@ -1410,6 +1479,7 @@ function canMergeBasic(source, target) {
     && target.level < 5;
 }
 
+// 根据两个特殊字查找是否能组成一个武将。
 function getHeroNameFromChars(source, target) {
   if (source.kind !== ITEM_KIND.SPECIAL_CHAR || target.kind !== ITEM_KIND.SPECIAL_CHAR) return '';
   const chars = [source.char, target.char].sort().join('');
@@ -1421,6 +1491,7 @@ function getHeroNameFromChars(source, target) {
   return '';
 }
 
+// 从微信触摸事件里取第一个触点，并统一成 { x, y }。
 function getTouchPoint(event) {
   const touch = event.changedTouches && event.changedTouches[0]
     ? event.changedTouches[0]
