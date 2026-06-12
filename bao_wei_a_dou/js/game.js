@@ -1370,10 +1370,42 @@ class Game {
     const rect = this.layout.recruitButton;
     const disabled = player.gold < cost;
     this.drawButton(ctx, rect, '征兵', disabled);
-    drawCenteredText(ctx, `🪙 ${cost}`, rect.x + rect.w / 2, rect.y + rect.h - 14, {
-      font: '14px sans-serif',
-      color: disabled ? '#846d5c' : '#fff8e6'
-    });
+    this.drawCoinAmount(ctx, cost, rect.x + rect.w / 2, rect.y + rect.h - 14, disabled, 'center');
+  }
+
+  drawCoinAmount(ctx, amount, x, y, disabled, align) {
+    const text = String(amount);
+    const iconRadius = 6;
+    const iconGap = 5;
+    ctx.save();
+    ctx.font = '14px sans-serif';
+    const textW = ctx.measureText(text).width;
+    const groupW = iconRadius * 2 + iconGap + textW;
+    const startX = align === 'center' ? x - groupW / 2 : x;
+    const iconX = startX + iconRadius;
+    const textX = startX + iconRadius * 2 + iconGap;
+    this.drawCoinIcon(ctx, iconX, y - 1, disabled);
+    ctx.fillStyle = disabled ? '#846d5c' : '#fff8e6';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, textX, y);
+    ctx.restore();
+  }
+
+  drawCoinIcon(ctx, x, y, disabled) {
+    ctx.save();
+    ctx.fillStyle = disabled ? '#b69b64' : '#f3c24f';
+    ctx.strokeStyle = disabled ? '#846d5c' : '#8a5a19';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = disabled ? '#8d734a' : '#fff0a8';
+    ctx.beginPath();
+    ctx.arc(x - 2, y - 2, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   // 通用文字按钮绘制方法。
