@@ -50,6 +50,7 @@ class Game {
     this.status = GAME_STATUS.HOME;
     this.lastFrameAt = now();
     this.drag = null;
+    this.selectedUnit = null;
     this.toast = null;
     this.modal = null;
     this.buttons = {};
@@ -142,6 +143,7 @@ class Game {
     };
     this.effects = [];
     this.drag = null;
+    this.selectedUnit = null;
     this.toast = null;
   }
 
@@ -713,6 +715,7 @@ class Game {
     this.drawTopBar(ctx);
     this.drawBoard(ctx, SIDES.RIVAL, true);
     this.drawBoard(ctx, SIDES.SELF, false);
+    this.drawSelectedUnitInfo(ctx);
     this.drawBench(ctx);
     this.drawRecruitButton(ctx);
     this.drawEffects(ctx);
@@ -774,6 +777,7 @@ class Game {
       }
     });
 
+    this.drawSelectedRange(ctx, side, small);
     board.units.forEach((unit) => this.drawUnit(ctx, unit, side, small));
     board.enemies.forEach((enemy) => this.drawEnemy(ctx, enemy, side, small));
 
@@ -808,6 +812,97 @@ class Game {
       ctx.textAlign = 'right';
       ctx.fillText(String(unit.level || 1), pos.x + cell - 6, pos.y + 12);
     }
+    ctx.restore();
+  }
+
+  // 绘制当前选中单位的攻击范围。范围内部用半透明白色，最外圈用黑色边界线。
+  drawSelectedRange(ctx, side, small) {
+    if (small || side !== SIDES.SELF || !this.selectedUnit || !this.selectedUnit.cell) return;
+    const board = this.boards[SIDES.SELF];
+    if (board.units.indexOf(this.selectedUnit) === -1) return;
+
+    const stats = getUnitStats(this.selectedUnit);
+    const range = Math.floor(stats.range || 0);
+    if (range <= 0) return;
+
+    const cellSize = this.layout.cell;
+    const center = this.selectedUnit.cell;
+    ctx.save();
+    for (let y = 0; y < BOARD.rows; y += 1) {
+      for (let x = 0; x < BOARD.cols; x += 1) {
+        const cell = { x, y };
+        if (manhattan(center, cell) > range) continue;
+
+        const pos = this.cellToPixel(cell, SIDES.SELF, false);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.24)';
+        ctx.fillRect(pos.x, pos.y, cellSize, cellSize);
+
+        ctx.strokeStyle = 'rgba(20, 16, 14, 0.82)';
+        ctx.lineWidth = 2;
+        const neighbors = [
+          { x, y: y - 1, edge: 'top' },
+          { x: x + 1, y, edge: 'right' },
+          { x, y: y + 1, edge: 'bottom' },
+          { x: x - 1, y, edge: 'left' }
+        ];
+        neighbors.forEach((next) => {
+          if (next.x >= 0 && next.x < BOARD.cols && next.y >= 0 && next.y < BOARD.rows
+            && manhattan(center, next) <= range) return;
+
+          ctx.beginPath();
+          if (next.edge === 'top') {
+            ctx.moveTo(pos.x, pos.y);
+            ctx.lineTo(pos.x + cellSize, pos.y);
+          } else if (next.edge === 'right') {
+            ctx.moveTo(pos.x + cellSize, pos.y);
+            ctx.lineTo(pos.x + cellSize, pos.y + cellSize);
+          } else if (next.edge === 'bottom') {
+            ctx.moveTo(pos.x, pos.y + cellSize);
+            ctx.lineTo(pos.x + cellSize, pos.y + cellSize);
+          } else {
+            ctx.moveTo(pos.x, pos.y);
+            ctx.lineTo(pos.x, pos.y + cellSize);
+          }
+          ctx.stroke();
+        });
+      }
+    }
+    ctx.restore();
+  }
+
+  // 绘制选中单位的名字、等级、攻击、攻速、射程和攻击类型。
+  drawSelectedUnitInfo(ctx) {
+    const unit = this.selectedUnit;
+    if (!unit || !unit.cell || this.boards[SIDES.SELF].units.indexOf(unit) === -1) return;
+
+    const stats = getUnitStats(unit);
+    const rect = {
+      x: this.layout.boardX,
+      y: Math.max(68, this.layout.selfBoardY - 56),
+      w: this.layout.boardW,
+      h: 46
+    };
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(246, 244, 236, 0.92)';
+    ctx.strokeStyle = COLORS.ink;
+    ctx.lineWidth = 2;
+    roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = COLORS.ink;
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 14px serif';
+    ctx.fillText(`${getUnitDisplayName(unit)}  Lv.${unit.level || 1}`, rect.x + 10, rect.y + 18);
+
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = COLORS.mutedInk;
+    ctx.fillText(
+      `攻 ${formatStat(stats.attack)}  速 ${formatStat(stats.attackSpeed)}  射程 ${stats.range || 0}  ${getUnitRoleLabel(unit)}`,
+      rect.x + 10,
+      rect.y + 36
+    );
     ctx.restore();
   }
 
@@ -1067,9 +1162,10 @@ class Game {
 
     const benchIndex = this.getBenchIndexAt(p);
     if (benchIndex !== -1) {
+      this.selectedUnit = null;
       const item = this.players[SIDES.SELF].bench[benchIndex];
       if (item) {
-        this.drag = { item, source: 'bench', benchIndex, x: p.x, y: p.y };
+        this.drag = { item, source: 'bench', benchIndex, x: p.x, y: p.y, startX: p.x, startY: p.y, moved: false };
         this.audio.play('drag');
       }
       return;
@@ -1079,9 +1175,13 @@ class Game {
     if (cell) {
       const unit = this.findUnitAt(SIDES.SELF, cell);
       if (unit) {
-        this.drag = { item: unit, source: 'board', fromCell: { x: unit.cell.x, y: unit.cell.y }, x: p.x, y: p.y };
+        this.drag = { item: unit, source: 'board', fromCell: { x: unit.cell.x, y: unit.cell.y }, x: p.x, y: p.y, startX: p.x, startY: p.y, moved: false };
         this.audio.play('drag');
+      } else {
+        this.selectedUnit = null;
       }
+    } else {
+      this.selectedUnit = null;
     }
   }
 
@@ -1090,6 +1190,9 @@ class Game {
     if (!this.drag) return;
     const p = getTouchPoint(event);
     if (!p) return;
+    const dx = p.x - this.drag.startX;
+    const dy = p.y - this.drag.startY;
+    if (Math.sqrt(dx * dx + dy * dy) > 8) this.drag.moved = true;
     this.drag.x = p.x;
     this.drag.y = p.y;
   }
@@ -1100,6 +1203,14 @@ class Game {
     const p = getTouchPoint(event) || { x: this.drag.x, y: this.drag.y };
     const drag = this.drag;
     this.drag = null;
+    const dx = p.x - drag.startX;
+    const dy = p.y - drag.startY;
+    if (Math.sqrt(dx * dx + dy * dy) > 8) drag.moved = true;
+    if (drag.source === 'board' && !drag.moved) {
+      this.selectedUnit = drag.item;
+      return;
+    }
+    this.selectedUnit = null;
     this.dropDraggedItem(drag, p);
   }
 
@@ -1122,6 +1233,7 @@ class Game {
     const targetUnit = this.findUnitAt(SIDES.SELF, cell);
     if (targetUnit && targetUnit !== drag.item) {
       if (this.tryMergeUnits(drag, targetUnit)) return;
+      if (this.trySwapUnits(drag, targetUnit)) return;
       this.toastMessage('不能合成');
       this.audio.play('error');
       return;
@@ -1205,6 +1317,37 @@ class Game {
       this.boards[SIDES.SELF].units.push(hero);
       this.effects.push({ type: 'heroSkill', side: SIDES.SELF, text: heroName, life: 0.8 });
       this.audio.play('merge');
+      return true;
+    }
+
+    return false;
+  }
+
+  // 不能合成时执行换位：棋盘拖棋盘交换格子；候选栏拖棋盘则和原候选栏位置互换。
+  trySwapUnits(drag, targetUnit) {
+    if (drag.item.kind === ITEM_KIND.SHOVEL) return false;
+
+    if (drag.source === 'board') {
+      const fromCell = drag.fromCell || drag.item.cell;
+      drag.item.cell = { x: targetUnit.cell.x, y: targetUnit.cell.y };
+      targetUnit.cell = { x: fromCell.x, y: fromCell.y };
+      this.audio.play('place');
+      return true;
+    }
+
+    if (drag.source === 'bench') {
+      const board = this.boards[SIDES.SELF];
+      const player = this.players[SIDES.SELF];
+      const placedUnit = createUnitFromItem(drag.item, SIDES.SELF);
+
+      placedUnit.cell = { x: targetUnit.cell.x, y: targetUnit.cell.y };
+      placedUnit.side = SIDES.SELF;
+      targetUnit.cell = null;
+
+      board.units = board.units.filter((unit) => unit !== targetUnit);
+      board.units.push(placedUnit);
+      player.bench[drag.benchIndex] = targetUnit;
+      this.audio.play('place');
       return true;
     }
 
@@ -1522,6 +1665,35 @@ function getItemText(item) {
   if (item.kind === ITEM_KIND.HERO) return item.heroName;
   if (item.kind === ITEM_KIND.BASIC) return BASIC_UNITS[item.unitId].text;
   return item.text || '';
+}
+
+// 获取信息面板展示用的完整名称。
+function getUnitDisplayName(unit) {
+  if (unit.kind === ITEM_KIND.HERO) return unit.heroName;
+  if (unit.kind === ITEM_KIND.SPECIAL_CHAR) return `${unit.char}`;
+  if (unit.kind === ITEM_KIND.BASIC) return BASIC_UNITS[unit.unitId].text;
+  return getItemText(unit);
+}
+
+// 获取信息面板第二行末尾的定位说明。
+function getUnitRoleLabel(unit) {
+  if (unit.kind === ITEM_KIND.BASIC) return BASIC_UNITS[unit.unitId].role || getAttackTypeLabel(unit.attackType);
+  if (unit.kind === ITEM_KIND.HERO) return getAttackTypeLabel(unit.attackType);
+  return '合成字';
+}
+
+// 把攻击类型转成玩家能看懂的中文。
+function getAttackTypeLabel(type) {
+  if (type === 'single') return '单体';
+  if (type === 'area') return '范围';
+  if (type === 'pierce') return '穿透';
+  return '无攻击';
+}
+
+// 属性数值保留一位小数，整数不显示小数点。
+function formatStat(value) {
+  const number = Number(value || 0);
+  return Number.isInteger(number) ? String(number) : number.toFixed(1);
 }
 
 // 判断两个基础单位是否可以合成：同类型、同等级、未满 5 级。
