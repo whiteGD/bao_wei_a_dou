@@ -791,7 +791,6 @@ class Game {
     const cell = small ? this.layout.rivalCell : this.layout.cell;
     const pos = this.cellToPixel(unit.cell, side, small);
     const center = { x: pos.x + cell / 2, y: pos.y + cell / 2 };
-    const text = getItemText(unit);
 
     ctx.save();
     ctx.fillStyle = unit.kind === ITEM_KIND.HERO ? '#fff0c2' : '#fffaf0';
@@ -801,10 +800,7 @@ class Game {
     ctx.fill();
     ctx.stroke();
 
-    drawCenteredText(ctx, text, center.x, center.y - (small ? 0 : 2), {
-      font: `bold ${Math.floor(cell * (text.length > 1 ? 0.38 : 0.58))}px serif`,
-      color: COLORS.ink
-    });
+    drawItemContent(ctx, unit, center.x, center.y - (small ? 0 : 2), cell);
 
     if (!small) {
       ctx.fillStyle = COLORS.danger;
@@ -864,10 +860,7 @@ class Game {
 
       const item = player.bench[i];
       if (item) {
-        drawCenteredText(ctx, getItemText(item), rect.x + rect.w / 2, rect.y + rect.h / 2, {
-          font: `bold ${Math.floor(cell * 0.42)}px serif`,
-          color: COLORS.ink
-        });
+        drawItemContent(ctx, item, rect.x + rect.w / 2, rect.y + rect.h / 2, cell);
       }
     }
   }
@@ -1022,10 +1015,7 @@ class Game {
     roundedRect(ctx, this.drag.x - size / 2, this.drag.y - size / 2, size, size, 5);
     ctx.fill();
     ctx.stroke();
-    drawCenteredText(ctx, getItemText(item), this.drag.x, this.drag.y, {
-      font: `bold ${Math.floor(size * 0.42)}px serif`,
-      color: COLORS.ink
-    });
+    drawItemContent(ctx, item, this.drag.x, this.drag.y, size);
     ctx.restore();
   }
 
@@ -1458,6 +1448,70 @@ function getUnitStats(unit) {
 // 根据玩家已征兵次数计算本次征兵价格。
 function getRecruitCost(player) {
   return PLAYER_DEFAULTS.recruitBaseCost + player.recruitCount * PLAYER_DEFAULTS.recruitCostStep;
+}
+
+// 绘制候选栏、棋盘和拖拽预览里的物品内容。
+// 铲子用图标，特殊字用金色文字，普通单位和武将继续使用原文字。
+function drawItemContent(ctx, item, x, y, size) {
+  if (item.kind === ITEM_KIND.SHOVEL) {
+    drawShovelIcon(ctx, x, y, size);
+    return;
+  }
+
+  const text = getItemText(item);
+  const isSpecialChar = item.kind === ITEM_KIND.SPECIAL_CHAR;
+  drawCenteredText(ctx, text, x, y, {
+    font: `bold ${Math.floor(size * (text.length > 1 ? 0.38 : 0.56))}px serif`,
+    color: isSpecialChar ? '#d8a73a' : COLORS.ink,
+    stroke: '',
+    strokeWidth: 0
+  });
+}
+
+// 纯 Canvas 铲子图标，避免用“铲”字和特殊合成字混淆。
+function drawShovelIcon(ctx, x, y, size) {
+  const scale = size / 68;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.translate(x, y);
+  ctx.rotate(Math.PI / 5);
+
+  ctx.strokeStyle = '#6b4226';
+  ctx.lineWidth = 6 * scale;
+  ctx.beginPath();
+  ctx.moveTo(-2 * scale, -17 * scale);
+  ctx.lineTo(5 * scale, 12 * scale);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#3f2618';
+  ctx.lineWidth = 5 * scale;
+  ctx.beginPath();
+  ctx.moveTo(-11 * scale, -21 * scale);
+  ctx.quadraticCurveTo(-2 * scale, -28 * scale, 8 * scale, -21 * scale);
+  ctx.moveTo(-11 * scale, -21 * scale);
+  ctx.lineTo(8 * scale, -21 * scale);
+  ctx.stroke();
+
+  ctx.fillStyle = '#cfd6d1';
+  ctx.strokeStyle = '#5d6764';
+  ctx.lineWidth = 2 * scale;
+  ctx.beginPath();
+  ctx.moveTo(-7 * scale, 10 * scale);
+  ctx.quadraticCurveTo(6 * scale, 8 * scale, 15 * scale, 16 * scale);
+  ctx.quadraticCurveTo(12 * scale, 28 * scale, 2 * scale, 29 * scale);
+  ctx.quadraticCurveTo(-8 * scale, 22 * scale, -7 * scale, 10 * scale);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.lineWidth = 1.5 * scale;
+  ctx.beginPath();
+  ctx.moveTo(0, 13 * scale);
+  ctx.quadraticCurveTo(7 * scale, 16 * scale, 8 * scale, 23 * scale);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // 获取候选栏或棋盘单位展示用的文字。
