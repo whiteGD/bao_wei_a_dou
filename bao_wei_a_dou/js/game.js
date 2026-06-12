@@ -650,6 +650,28 @@ class Game {
   }
 
   // 推进所有己方单位攻击冷却，冷却结束后寻找目标并攻击。
+  isOnlineRoom() {
+    return !!(this.room && this.cloud.enabled);
+  }
+
+  confirmSurrender() {
+    if (this.status !== GAME_STATUS.PLAYING && this.status !== GAME_STATUS.PAUSED) return;
+    if (typeof wx !== 'undefined' && wx.showModal) {
+      wx.showModal({
+        title: '确认投降',
+        content: '投降后本局将直接判负，是否继续？',
+        confirmText: '投降',
+        confirmColor: '#ba2f2f',
+        cancelText: '取消',
+        success: (res) => {
+          if (res.confirm) this.finishGame(SIDES.SELF);
+        }
+      });
+      return;
+    }
+    this.finishGame(SIDES.SELF);
+  }
+
   updateUnits(side, dt) {
     const board = this.boards[side];
     board.units.forEach((unit) => {
@@ -1133,7 +1155,7 @@ class Game {
   drawTopBar(ctx) {
     const y = this.layout.topBarY;
     this.drawIconButton(ctx, this.layout.pauseButton, this.status === GAME_STATUS.PAUSED ? '▶' : 'Ⅱ');
-    this.drawIconButton(ctx, this.layout.resetButton, '↻');
+    this.drawIconButton(ctx, this.layout.resetButton, this.isOnlineRoom() ? '降' : '↻');
     this.drawIconButton(ctx, this.layout.muteButton, this.audio.muted ? '静' : '音');
 
     const player = this.players[SIDES.SELF];
@@ -1703,8 +1725,8 @@ class Game {
       return;
     }
     if (pointInRect(p, this.layout.resetButton)) {
-      if (this.room && this.cloud.enabled) {
-        this.toastMessage('联网对局暂不支持单方重开');
+      if (this.isOnlineRoom()) {
+        this.confirmSurrender();
         return;
       }
       this.resetLocalGame();
