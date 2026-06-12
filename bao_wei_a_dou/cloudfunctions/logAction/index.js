@@ -24,6 +24,7 @@ exports.main = async function main(event) {
 
   const log = {
     roomId,
+    roundId: room.roundId || 1,
     playerSide: player.side,
     type: event.type,
     payload: event.payload || {},

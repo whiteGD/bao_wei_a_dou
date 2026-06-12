@@ -31,6 +31,7 @@ class CloudService {
     this.localRoom = {
       roomId: makeId('room'),
       side: 'A',
+      roundId: 1,
       seed: String(Date.now()),
       status: 'playing'
     };
@@ -45,6 +46,7 @@ class CloudService {
     this.localRoom = {
       roomId: roomId || makeId('room'),
       side: 'B',
+      roundId: 1,
       seed: String(Date.now()),
       status: 'playing'
     };
@@ -74,6 +76,24 @@ class CloudService {
       return { ok: true };
     }
     return this.callFunction('updateState', payload);
+  }
+
+  async restartRoom(payload) {
+    if (this.enabled) {
+      return this.callFunction('restartRoom', payload);
+    }
+
+    if (payload && payload.action === 'leave') {
+      if (this.localRoom) this.localRoom.status = 'closed';
+      return { ok: true, status: 'closed' };
+    }
+
+    if (this.localRoom) {
+      this.localRoom.roundId = (this.localRoom.roundId || 1) + 1;
+      this.localRoom.seed = String(Date.now());
+      this.localRoom.status = 'playing';
+    }
+    return this.localRoom || { ok: true, status: 'playing' };
   }
 
   async getRoom(roomId) {

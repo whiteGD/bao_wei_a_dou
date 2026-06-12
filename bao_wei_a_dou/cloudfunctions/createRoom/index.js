@@ -14,6 +14,7 @@ exports.main = async function main(event) {
     roomId,
     status: 'waiting',
     mode: 'duel',
+    roundId: 1,
     seed,
     battleStartAt: 0,
     states: {},
@@ -43,6 +44,7 @@ exports.main = async function main(event) {
   return {
     roomId,
     side: 'A',
+    roundId: 1,
     seed,
     battleStartAt: 0,
     status: room.status

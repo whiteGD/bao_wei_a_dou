@@ -19,6 +19,7 @@ exports.main = async function main(event) {
   const settlement = await db.runTransaction(async (transaction) => {
     const roomResult = await transaction.collection('rooms').doc(roomDocId).get();
     const room = roomResult.data;
+    const roundId = room.roundId || 1;
 
     if (room.status === 'finished' && room.result) {
       return { ok: true, result: room.result, shouldRecord: false };
@@ -53,7 +54,8 @@ exports.main = async function main(event) {
       failedSide,
       reason: firstFailure.reason || reason,
       finishedAt: firstFailure.failedAt || now,
-      decidedBy: 'failureReport'
+      decidedBy: 'failureReport',
+      roundId
     };
 
     await transaction.collection('rooms').doc(roomDocId).update({
@@ -65,13 +67,14 @@ exports.main = async function main(event) {
       }
     });
 
-    return { ok: true, result, side, shouldRecord: true };
+    return { ok: true, result, side, roundId, shouldRecord: true };
   });
 
   if (settlement.shouldRecord) {
     await db.collection('battleRecords').add({
       data: {
         roomId,
+        roundId: settlement.roundId,
         winner: settlement.result.winner,
         failedSide: settlement.result.failedSide,
         reason: settlement.result.reason,
@@ -83,6 +86,7 @@ exports.main = async function main(event) {
     await db.collection('roomLogs').add({
       data: {
         roomId,
+        roundId: settlement.roundId,
         playerSide: settlement.side,
         type: 'FINISH',
         payload: settlement.result,

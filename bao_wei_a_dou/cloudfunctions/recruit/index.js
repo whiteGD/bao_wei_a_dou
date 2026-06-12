@@ -44,9 +44,12 @@ exports.main = async function main(event) {
   }
 
   if (roomId) {
+    const rooms = await db.collection('rooms').where({ roomId }).limit(1).get();
+    const room = rooms.data && rooms.data[0] ? rooms.data[0] : null;
     await db.collection('roomLogs').add({
       data: {
         roomId,
+        roundId: room ? room.roundId || 1 : 1,
         playerSide: side,
         type: 'RECRUIT',
         payload: { recruitCount, items },

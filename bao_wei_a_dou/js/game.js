@@ -63,6 +63,7 @@ class Game {
 
     this.room = null;
     this.selfSide = 'A';
+    this.roundId = 1;
     this.launchRoomId = '';
     this.savedRoomId = '';
     this.roomWatcher = null;
@@ -73,6 +74,8 @@ class Game {
     this.settlingReason = '';
     this.nextResultPollAt = 0;
     this.resultPolling = false;
+    this.rematchWaiting = false;
+    this.leavingRoom = false;
     this.recruiting = false;
     this.battleClockSynced = false;
     this.nextStateSyncAt = 0;
@@ -183,6 +186,7 @@ class Game {
       const room = await this.cloud.createRoom();
       this.room = room;
       this.selfSide = room.side || 'A';
+      this.roundId = room.roundId || 1;
       this.rememberActiveRoom(room.roomId);
       this.resetLocalGame(room.seed || String(Date.now()));
 
@@ -216,6 +220,7 @@ class Game {
       const room = await this.cloud.joinRoom(targetRoomId);
       this.room = room;
       this.selfSide = room.side || 'B';
+      this.roundId = room.roundId || 1;
       this.rememberActiveRoom(room.roomId);
       this.resetLocalGame(room.seed || String(Date.now()));
 
@@ -227,7 +232,20 @@ class Game {
       }
 
       if (room.status === 'finished') {
+        this.startRoomWatcher();
         this.applyRemoteFinish(room.result || {});
+        return;
+      }
+
+      if (room.status === 'rematch_waiting') {
+        this.status = GAME_STATUS.FINISHED;
+        this.startRoomWatcher();
+        this.updateRematchWaitingModal(room);
+        return;
+      }
+
+      if (room.status === 'closed') {
+        this.applyRoomClosed(room);
         return;
       }
 
@@ -354,9 +372,23 @@ class Game {
     this.roomWatcher = this.cloud.watchRoom(this.room.roomId, (room) => {
       this.room = Object.assign({}, this.room, room);
       this.applyRemoteStateFromRoom(room);
+      if (room.status === 'closed') {
+        this.applyRoomClosed(room);
+        return;
+      }
       if (this.status === GAME_STATUS.ROOM && room.status === 'playing') {
+        this.roundId = room.roundId || this.roundId || 1;
         this.enterPlayingRoom();
         this.toastMessage('好友已加入，开始对局');
+        return;
+      }
+      if (this.status === GAME_STATUS.FINISHED && room.status === 'playing' && this.rematchWaiting) {
+        this.startRematchRound(room);
+        return;
+      }
+      if (room.status === 'rematch_waiting' && this.status === GAME_STATUS.FINISHED) {
+        this.updateRematchWaitingModal(room);
+        return;
       }
       if (room.status === 'finished' && this.status !== GAME_STATUS.FINISHED) {
         this.applyRemoteFinish(room.result || {});
@@ -386,6 +418,42 @@ class Game {
     this.logWatcher = null;
   }
 
+  startRematchRound(room) {
+    this.roundId = room.roundId || this.roundId || 1;
+    this.room = Object.assign({}, this.room, room);
+    this.resetLocalGame(room.seed || String(Date.now()));
+    this.modal = null;
+    this.rematchWaiting = false;
+    this.leavingRoom = false;
+    this.enterPlayingRoom();
+    this.toastMessage('双方已确认，开始新一局');
+  }
+
+  updateRematchWaitingModal(room) {
+    const ready = room.rematchReady || {};
+    if (ready[this.selfSide]) {
+      this.rematchWaiting = true;
+      this.modal = {
+        title: '等待对方',
+        message: '已准备再来一局，等待对方确认'
+      };
+    }
+  }
+
+  applyRoomClosed(room) {
+    if (room.leftSide && room.leftSide !== this.selfSide) {
+      this.status = GAME_STATUS.FINISHED;
+      this.rematchWaiting = false;
+      this.modal = {
+        title: '对方已离开房间',
+        message: '本房间已结束',
+        allowRestart: false
+      };
+      this.clearActiveRoomMemory();
+      this.closeRealtimeWatchers();
+    }
+  }
+
   // 重置一局本地游戏：双方玩家、双方棋盘、拖拽状态和临时提示都会回到初始值。
   resetLocalGame(seed) {
     this.seed = seed || String(Date.now());
@@ -413,28 +481,60 @@ class Game {
     this.lastRemoteStateAt = 0;
   }
 
-  // 结算弹窗的再开入口。联机对局必须重新创建云房间，不能退化成单机练习。
+  // 结算弹窗的再开入口。联机对局在同一个房间内等待双方确认后进入新回合。
   async restartFinishedGame() {
     const restartOnline = this.isOnlineRoom();
-    this.closeRealtimeWatchers();
-    this.modal = null;
 
     if (restartOnline) {
-      this.room = null;
-      const started = await this.createRoomAndStart();
-      if (!started) {
-        this.status = GAME_STATUS.FINISHED;
+      if (this.rematchWaiting) return;
+      this.rematchWaiting = true;
+      this.modal = {
+        title: '等待对方',
+        message: '已准备再来一局，等待对方确认'
+      };
+      try {
+        const result = await this.cloud.restartRoom({
+          roomId: this.room.roomId,
+          action: 'ready'
+        });
+        if (result && result.status === 'playing') {
+          this.startRematchRound(Object.assign({}, this.room, result));
+        }
+      } catch (err) {
+        this.rematchWaiting = false;
         this.modal = {
-          title: '创建失败',
-          message: '联机房间创建失败，请检查网络后重试'
+          title: '再来一局失败',
+          message: err.message || '请检查网络后重试'
         };
+        this.audio.play('error');
       }
       return;
     }
 
+    this.closeRealtimeWatchers();
+    this.modal = null;
     this.room = null;
     this.resetLocalGame();
     this.status = GAME_STATUS.PLAYING;
+  }
+
+  async exitFinishedGame() {
+    if (this.isOnlineRoom() && !this.leavingRoom) {
+      this.leavingRoom = true;
+      try {
+        await this.cloud.restartRoom({
+          roomId: this.room.roomId,
+          action: 'leave'
+        });
+      } catch (err) {
+        console.warn('leave room failed', err);
+      }
+    }
+    this.rematchWaiting = false;
+    this.leavingRoom = false;
+    this.room = null;
+    this.clearActiveRoomMemory();
+    this.showHome();
   }
 
   // 记录玩家低频操作。联网时写入 roomLogs，单机练习时直接忽略。
@@ -453,6 +553,7 @@ class Game {
 
   // 回放对手操作。注意：本机永远操作 SELF 区域，对手操作永远映射到 RIVAL 区域。
   applyRemoteLog(log) {
+    if (this.isOnlineRoom() && log.roundId && log.roundId !== this.roundId) return;
     const logId = log._id || `${log.type}_${log.createdAt}_${log.playerSide}`;
     if (this.processedLogIds[logId]) return;
     this.processedLogIds[logId] = true;
@@ -630,7 +731,7 @@ class Game {
     this.settlingReason = '';
     this.nextResultPollAt = 0;
     this.resultPolling = false;
-    if (this.isOnlineRoom()) this.clearActiveRoomMemory();
+    this.rematchWaiting = false;
     this.audio.play('finish');
     const failedSide = payload.failedSide;
     if (!failedSide) {
@@ -2144,9 +2245,24 @@ class Game {
       font: '16px sans-serif',
       color: COLORS.mutedInk
     });
-    const btn = { x: rect.x + 44, y: rect.y + 142, w: rect.w - 88, h: 48 };
-    this.buttons.modalRestart = btn;
-    this.drawButton(ctx, btn, this.isOnlineRoom() ? '再开联机房间' : '再来一局');
+    const canRestart = this.modal.allowRestart !== false;
+    if (!canRestart) {
+      const exitBtn = { x: rect.x + 44, y: rect.y + 142, w: rect.w - 88, h: 48 };
+      this.buttons.modalRestart = null;
+      this.buttons.modalExit = exitBtn;
+      this.drawButton(ctx, exitBtn, '退出游戏');
+      ctx.restore();
+      return;
+    }
+
+    const gap = 14;
+    const btnW = (rect.w - 88 - gap) / 2;
+    const restartBtn = { x: rect.x + 44, y: rect.y + 142, w: btnW, h: 48 };
+    const exitBtn = { x: restartBtn.x + btnW + gap, y: restartBtn.y, w: btnW, h: 48 };
+    this.buttons.modalRestart = restartBtn;
+    this.buttons.modalExit = exitBtn;
+    this.drawButton(ctx, restartBtn, this.rematchWaiting ? '等待中' : '再来一局', this.rematchWaiting);
+    this.drawButton(ctx, exitBtn, '退出游戏');
     ctx.restore();
   }
 
@@ -2250,7 +2366,13 @@ class Game {
       return;
     }
 
-    if (this.modal && pointInRect(p, this.buttons.modalRestart)) {
+    if (this.modal && this.buttons.modalExit && pointInRect(p, this.buttons.modalExit)) {
+      this.exitFinishedGame();
+      return;
+    }
+
+    if (this.modal && this.buttons.modalRestart && pointInRect(p, this.buttons.modalRestart)) {
+      if (this.rematchWaiting) return;
       this.restartFinishedGame();
       return;
     }
