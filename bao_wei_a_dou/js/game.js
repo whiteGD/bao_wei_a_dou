@@ -581,7 +581,7 @@ class Game {
     const boardH = cell * BOARD.rows;
     const x = Math.floor((this.width - realBoardW) / 2);
     const selfY = Math.max(160, this.height - boardH - 128);
-    const rivalScale = 0.75;
+    const rivalScale = 0.65;
     const rivalCell = Math.max(12, Math.floor(cell * rivalScale));
     const rivalW = rivalCell * BOARD.cols;
 
@@ -913,17 +913,30 @@ class Game {
       ctx.font = `bold ${Math.floor(cell * 0.22)}px sans-serif`;
       ctx.fillStyle = COLORS.ink;
       ctx.textAlign = 'center';
-      ctx.fillText(enemyName, cx, cy + cell * 0.48);
+      if (enemy.isGeneral) {
+        ctx.fillText(enemyName, cx, cy + cell * 0.48);
+      }
 
+      const barW = cell * 0.92;
+      const barX = cx - barW / 2;
       ctx.fillStyle = '#4f1e1e';
-      ctx.fillRect(pos.x + 4, pos.y + 3, cell - 8, 4);
+      ctx.fillRect(barX, pos.y + 3, barW, 4);
       ctx.fillStyle = '#e1533d';
-      ctx.fillRect(pos.x + 4, pos.y + 3, (cell - 8) * clamp(enemy.hp / enemy.maxHp, 0, 1), 4);
+      ctx.fillRect(barX, pos.y + 3, barW * clamp(enemy.hp / enemy.maxHp, 0, 1), 4);
     } else {
       ctx.font = `bold ${Math.floor(cell * 0.18)}px sans-serif`;
       ctx.fillStyle = COLORS.ink;
       ctx.textAlign = 'center';
-      ctx.fillText(enemyName.length > 2 ? enemyName.slice(0, 2) : enemyName, cx, cy + cell * 0.46);
+      if (enemy.isGeneral) {
+        ctx.fillText(enemyName.length > 2 ? enemyName.slice(0, 2) : enemyName, cx, cy + cell * 0.46);
+      }
+
+      const barW = cell * 0.9;
+      const barX = cx - barW / 2;
+      ctx.fillStyle = '#4f1e1e';
+      ctx.fillRect(barX, pos.y + 1, barW, 3);
+      ctx.fillStyle = '#e1533d';
+      ctx.fillRect(barX, pos.y + 1, barW * clamp(enemy.hp / enemy.maxHp, 0, 1), 3);
     }
     ctx.restore();
   }
