@@ -56,6 +56,7 @@ class Game {
     this.selectedUnit = null;
     this.toast = null;
     this.modal = null;
+    this.roomInputModal = null;
     this.buttons = {};
     this.layout = {};
     this.systemInfo = null;
@@ -85,6 +86,7 @@ class Game {
     this.handleTouchStart = this.handleTouchStart.bind(this);
     this.handleTouchMove = this.handleTouchMove.bind(this);
     this.handleTouchEnd = this.handleTouchEnd.bind(this);
+    this.handleKeyboardInput = this.handleKeyboardInput.bind(this);
     this.handleKeyboardConfirm = this.handleKeyboardConfirm.bind(this);
     this.loop = this.loop.bind(this);
   }
@@ -134,6 +136,9 @@ class Game {
     if (wx.onKeyboardConfirm) {
       wx.onKeyboardConfirm(this.handleKeyboardConfirm);
     }
+    if (wx.onKeyboardInput) {
+      wx.onKeyboardInput(this.handleKeyboardInput);
+    }
   }
 
   // 切回首页状态，同时清空首页之外的弹窗和按钮缓存。
@@ -141,6 +146,8 @@ class Game {
     this.status = GAME_STATUS.HOME;
     this.buttons = {};
     this.modal = null;
+    this.roomInputModal = null;
+    if (typeof wx !== 'undefined' && wx.hideKeyboard) wx.hideKeyboard();
     this.closeRealtimeWatchers();
   }
 
@@ -241,7 +248,7 @@ class Game {
     this.joinRoomAndStart(roomId, true);
   }
 
-  // 调起微信小游戏系统键盘，让玩家手动输入房间号加入。
+  // 打开自绘房间号弹窗，同时调起系统键盘只负责输入，不依赖系统输入框展示。
   showRoomIdKeyboard() {
     if (!this.cloud.enabled) {
       this.toastMessage('当前是本地模式，无法通过房间号加入');
@@ -253,7 +260,9 @@ class Game {
       return;
     }
 
-    this.toastMessage('请输入好友给你的房间号');
+    this.roomInputModal = { value: '' };
+    this.buttons.roomInputCancel = null;
+    this.buttons.roomInputConfirm = null;
     wx.showKeyboard({
       defaultValue: '',
       maxLength: 24,
@@ -263,16 +272,34 @@ class Game {
     });
   }
 
-  // 键盘确认事件是全局事件，因此只在首页状态下把输入当作房间号处理。
+  // 系统键盘只负责采集输入，房间号展示由 Canvas 弹窗绘制，避免原生输入框样式突兀。
+  handleKeyboardInput(event) {
+    if (!this.roomInputModal) return;
+    this.roomInputModal.value = normalizeRoomId(event && event.value).slice(0, 24);
+  }
+
+  // 键盘确认事件是全局事件，因此只在房间号弹窗打开时把输入当作房间号处理。
   handleKeyboardConfirm(event) {
-    if (this.status !== GAME_STATUS.HOME) return;
-    const roomId = normalizeRoomId(event && event.value);
-    if (!roomId) {
+    if (!this.roomInputModal) return;
+    const roomId = normalizeRoomId((event && event.value) || this.roomInputModal.value);
+    this.confirmRoomIdInput(roomId);
+  }
+
+  confirmRoomIdInput(roomId) {
+    const normalized = normalizeRoomId(roomId);
+    if (!this.roomInputModal) return;
+    if (!normalized) {
       this.toastMessage('房间号不能为空');
+      this.audio.play('error');
       return;
     }
-    if (wx.hideKeyboard) wx.hideKeyboard();
-    this.joinRoomAndStart(roomId);
+    this.closeRoomIdInput();
+    this.joinRoomAndStart(normalized);
+  }
+
+  closeRoomIdInput() {
+    this.roomInputModal = null;
+    if (typeof wx !== 'undefined' && wx.hideKeyboard) wx.hideKeyboard();
   }
 
   // 进入正式对局，并开启操作日志监听。两个客户端都只监听对方操作。
@@ -1277,6 +1304,7 @@ class Game {
 
     if (this.toast) this.drawToast(ctx);
     if (this.status === GAME_STATUS.SETTLING) this.drawSettlementOverlay(ctx);
+    if (this.roomInputModal) this.drawRoomInputModal(ctx);
     if (this.modal) this.drawModal(ctx);
     if (this.drag) this.drawDraggedItem(ctx);
   }
@@ -1478,7 +1506,7 @@ class Game {
     ctx.textAlign = 'center';
     // 提示文字放在最后一个按钮下方，避免按钮数量变化时和“本地练习”重叠。
     const hintY = Math.min(this.height - 24, localBtn.y + localBtn.h + 32);
-    ctx.fillText(this.cloud.enabled ? '云开发已启用，可创建房间或输入房间号加入' : '云环境 ID 未配置时会自动使用本地模拟', this.width / 2, hintY);
+    ctx.fillText(this.cloud.enabled ? '联机模式已启用，可创建房间或输入房间号加入' : '云环境未配置时会自动使用本地模拟', this.width / 2, hintY);
   }
 
   // 房间等待页。创建者停留在这里，直到好友通过分享链接加入。
@@ -2060,6 +2088,55 @@ class Game {
     ctx.restore();
   }
 
+  // 自绘房间号输入弹窗。系统键盘只采集字符，弹窗负责展示、确认和关闭。
+  drawRoomInputModal(ctx) {
+    const value = this.roomInputModal && this.roomInputModal.value ? this.roomInputModal.value : '';
+    ctx.save();
+    ctx.fillStyle = 'rgba(40,30,20,0.46)';
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const rect = { x: 38, y: this.height / 2 - 142, w: this.width - 76, h: 250 };
+    ctx.fillStyle = COLORS.panel;
+    ctx.strokeStyle = COLORS.ink;
+    ctx.lineWidth = 3;
+    roundedRect(ctx, rect.x, rect.y, rect.w, rect.h, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    drawCenteredText(ctx, '输入房间号', this.width / 2, rect.y + 44, {
+      font: 'bold 28px serif',
+      color: COLORS.ink
+    });
+    drawCenteredText(ctx, '请输入好友分享给你的房间号', this.width / 2, rect.y + 76, {
+      font: '14px sans-serif',
+      color: COLORS.mutedInk
+    });
+
+    const inputRect = { x: rect.x + 28, y: rect.y + 100, w: rect.w - 56, h: 52 };
+    ctx.fillStyle = '#fffaf0';
+    ctx.strokeStyle = COLORS.wood;
+    ctx.lineWidth = 2;
+    roundedRect(ctx, inputRect.x, inputRect.y, inputRect.w, inputRect.h, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = value ? COLORS.ink : COLORS.mutedInk;
+    ctx.font = value ? 'bold 20px sans-serif' : '16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(value || '例如 RABC123', inputRect.x + inputRect.w / 2, inputRect.y + inputRect.h / 2);
+
+    const gap = 14;
+    const btnW = (rect.w - 56 - gap) / 2;
+    const cancelBtn = { x: rect.x + 28, y: rect.y + 178, w: btnW, h: 48 };
+    const confirmBtn = { x: cancelBtn.x + btnW + gap, y: cancelBtn.y, w: btnW, h: 48 };
+    this.buttons.roomInputCancel = cancelBtn;
+    this.buttons.roomInputConfirm = confirmBtn;
+    this.drawButton(ctx, cancelBtn, '取消');
+    this.drawButton(ctx, confirmBtn, '加入');
+    ctx.restore();
+  }
+
   // 拖拽过程中绘制跟随手指移动的单位/道具预览。
   drawDraggedItem(ctx) {
     const item = this.drag.item;
@@ -2080,6 +2157,15 @@ class Game {
   handleTouchStart(event) {
     const p = getTouchPoint(event);
     if (!p) return;
+
+    if (this.roomInputModal) {
+      if (this.buttons.roomInputCancel && pointInRect(p, this.buttons.roomInputCancel)) {
+        this.closeRoomIdInput();
+      } else if (this.buttons.roomInputConfirm && pointInRect(p, this.buttons.roomInputConfirm)) {
+        this.confirmRoomIdInput(this.roomInputModal.value);
+      }
+      return;
+    }
 
     if (this.status === GAME_STATUS.HOME) {
       if (pointInRect(p, this.buttons.createBtn)) this.createRoomAndStart();
