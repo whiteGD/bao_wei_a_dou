@@ -581,7 +581,7 @@ class Game {
     const boardH = cell * BOARD.rows;
     const x = Math.floor((this.width - realBoardW) / 2);
     const selfY = Math.max(160, this.height - boardH - 128);
-    const rivalScale = 0.42;
+    const rivalScale = 0.75;
     const rivalCell = Math.max(12, Math.floor(cell * rivalScale));
     const rivalW = rivalCell * BOARD.cols;
 
