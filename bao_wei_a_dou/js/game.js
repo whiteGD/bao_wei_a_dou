@@ -16,6 +16,7 @@ const {
 const {
   clamp,
   lerp,
+  distance,
   manhattan,
   sameCell,
   cellKey,
@@ -347,10 +348,9 @@ class Game {
   findTargetsForUnit(side, unit) {
     const board = this.boards[side];
     const stats = getUnitStats(unit);
-    const enemiesInRange = board.enemies.filter((enemy) => {
-      const cell = this.enemyCell(enemy);
-      return manhattan(unit.cell, cell) <= stats.range;
-    });
+    const enemiesInRange = board.enemies.filter((enemy) => (
+      distance(unit.cell, this.enemyCell(enemy)) <= stats.range
+    ));
 
     if (enemiesInRange.length === 0) return [];
 
@@ -822,51 +822,23 @@ class Game {
     if (board.units.indexOf(this.selectedUnit) === -1) return;
 
     const stats = getUnitStats(this.selectedUnit);
-    const range = Math.floor(stats.range || 0);
+    const range = stats.range || 0;
     if (range <= 0) return;
 
     const cellSize = this.layout.cell;
-    const center = this.selectedUnit.cell;
+    const pos = this.cellToPixel(this.selectedUnit.cell, SIDES.SELF, false);
+    const cx = pos.x + cellSize / 2;
+    const cy = pos.y + cellSize / 2;
+    const radius = range * cellSize;
+
     ctx.save();
-    for (let y = 0; y < BOARD.rows; y += 1) {
-      for (let x = 0; x < BOARD.cols; x += 1) {
-        const cell = { x, y };
-        if (manhattan(center, cell) > range) continue;
-
-        const pos = this.cellToPixel(cell, SIDES.SELF, false);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.24)';
-        ctx.fillRect(pos.x, pos.y, cellSize, cellSize);
-
-        ctx.strokeStyle = 'rgba(20, 16, 14, 0.82)';
-        ctx.lineWidth = 2;
-        const neighbors = [
-          { x, y: y - 1, edge: 'top' },
-          { x: x + 1, y, edge: 'right' },
-          { x, y: y + 1, edge: 'bottom' },
-          { x: x - 1, y, edge: 'left' }
-        ];
-        neighbors.forEach((next) => {
-          if (next.x >= 0 && next.x < BOARD.cols && next.y >= 0 && next.y < BOARD.rows
-            && manhattan(center, next) <= range) return;
-
-          ctx.beginPath();
-          if (next.edge === 'top') {
-            ctx.moveTo(pos.x, pos.y);
-            ctx.lineTo(pos.x + cellSize, pos.y);
-          } else if (next.edge === 'right') {
-            ctx.moveTo(pos.x + cellSize, pos.y);
-            ctx.lineTo(pos.x + cellSize, pos.y + cellSize);
-          } else if (next.edge === 'bottom') {
-            ctx.moveTo(pos.x, pos.y + cellSize);
-            ctx.lineTo(pos.x + cellSize, pos.y + cellSize);
-          } else {
-            ctx.moveTo(pos.x, pos.y);
-            ctx.lineTo(pos.x, pos.y + cellSize);
-          }
-          ctx.stroke();
-        });
-      }
-    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.24)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(20, 16, 14, 0.82)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
     ctx.restore();
   }
 
