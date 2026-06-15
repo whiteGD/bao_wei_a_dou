@@ -1049,7 +1049,7 @@ class Game {
     const board = this.boards[side];
     const cfg = board.waveConfig;
     const general = isGeneral ? cfg.general : null;
-    const hp = isGeneral ? cfg.enemyHp * 3 : cfg.enemyHp;
+    const hp = isGeneral ? cfg.enemyHp * 2.5 : cfg.enemyHp;
     const armor = isGeneral ? cfg.enemyArmor + 3 : cfg.enemyArmor + (board.debuff.armorUp || 0);
 
     board.enemies.push({
