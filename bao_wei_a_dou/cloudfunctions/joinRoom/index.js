@@ -27,6 +27,7 @@ exports.main = async function main(event) {
         side: existingPlayer.side,
         roundId: room.roundId || 1,
         seed: room.seed,
+        mapId: room.mapId || 'map1',
         battleStartAt: room.battleStartAt || 0,
         status: room.status,
         states: room.states || {},
@@ -64,6 +65,7 @@ exports.main = async function main(event) {
       side: 'B',
       roundId: room.roundId || 1,
       seed: room.seed,
+      mapId: room.mapId || 'map1',
       battleStartAt,
       status: 'playing',
       states: room.states || {}

@@ -5,7 +5,7 @@
 
 const APP_ID = '';
 
-// 云开发环境 ID 还未提供。填入真实环境 ID 后，CloudService 会自动优先调用云函数。
+// 云开发环境 ID。填入真实环境 ID 后，CloudService 会自动优先调用云函数。
 const CLOUD_ENV_ID = 'cloud1-d4gchjamq29fc8ca7';
 
 // 双方阵营标识。SELF 是本机玩家视角，RIVAL 是对手视角。
@@ -42,44 +42,142 @@ const GAME_STATUS = {
   FINISHED: 'finished'
 };
 
-// 参考图约为 9x10 棋盘。为了方便实现镜像与触摸映射，逻辑坐标固定从左上角开始。
-const BOARD = {
-  cols: 9,
-  rows: 9,
-  initialBuildCells: [
-    { x: 3, y: 6 },
-    { x: 4, y: 6 },
-    { x: 5, y: 6 },
-    { x: 3, y: 7 },
-    { x: 4, y: 7 },
-    { x: 5, y: 7 }
-  ],
-  // 路径参考图中棕色道路，从左下入口绕到右下“斗”。
-  path: [
-    { x: 0, y: 8 },
-    { x: 0, y: 7 },
-    { x: 0, y: 6 },
-    { x: 0, y: 5 },
-    { x: 1, y: 5 },
-    { x: 2, y: 5 },
-    { x: 3, y: 5 },
-    { x: 4, y: 5 },
-    { x: 5, y: 5 },
-    { x: 5, y: 4 },
-    { x: 5, y: 3 },
-    { x: 5, y: 2 },
-    { x: 6, y: 2 },
-    { x: 7, y: 2 },
-    { x: 8, y: 2 },
-    { x: 8, y: 3 },
-    { x: 8, y: 4 },
-    { x: 8, y: 5 },
-    { x: 8, y: 6 },
-    { x: 8, y: 7 },
-    { x: 8, y: 8 }
-  ],
-  baseCell: { x: 8, y: 8 }
+const DEFAULT_WAVE_MODIFIER = {
+  enemyCountRate: 1,
+  enemyHpRate: 1,
+  enemySpeedRate: 1,
+  enemyArmorBonus: 0,
+  spawnIntervalRate: 1
 };
+
+// 9x9 地图配置。坐标从左上角开始，x 向右增加，y 向下增加。
+const MAPS = {
+  map1: {
+    id: 'map1',
+    name: '默认地图',
+    cols: 9,
+    rows: 9,
+    initialBuildCells: [
+      { x: 3, y: 6 },
+      { x: 4, y: 6 },
+      { x: 5, y: 6 },
+      { x: 3, y: 7 },
+      { x: 4, y: 7 },
+      { x: 5, y: 7 }
+    ],
+    path: [
+      { x: 0, y: 8 },
+      { x: 0, y: 7 },
+      { x: 0, y: 6 },
+      { x: 0, y: 5 },
+      { x: 1, y: 5 },
+      { x: 2, y: 5 },
+      { x: 3, y: 5 },
+      { x: 4, y: 5 },
+      { x: 5, y: 5 },
+      { x: 5, y: 4 },
+      { x: 5, y: 3 },
+      { x: 5, y: 2 },
+      { x: 6, y: 2 },
+      { x: 7, y: 2 },
+      { x: 8, y: 2 },
+      { x: 8, y: 3 },
+      { x: 8, y: 4 },
+      { x: 8, y: 5 },
+      { x: 8, y: 6 },
+      { x: 8, y: 7 },
+      { x: 8, y: 8 }
+    ],
+    baseCell: { x: 8, y: 8 },
+    waveModifier: DEFAULT_WAVE_MODIFIER
+  },
+  map2: {
+    id: 'map2',
+    name: '第二张图',
+    cols: 9,
+    rows: 9,
+    initialBuildCells: [
+      { x: 3, y: 4 },
+      { x: 4, y: 4 },
+      { x: 5, y: 4 },
+      { x: 3, y: 5 },
+      { x: 4, y: 5 },
+      { x: 5, y: 5 }
+    ],
+    path: [
+      { x: 0, y: 0 },
+      { x: 0, y: 1 },
+      { x: 0, y: 2 },
+      { x: 0, y: 3 },
+      { x: 0, y: 4 },
+      { x: 0, y: 5 },
+      { x: 0, y: 6 },
+      { x: 1, y: 6 },
+      { x: 2, y: 6 },
+      { x: 3, y: 6 },
+      { x: 3, y: 7 },
+      { x: 3, y: 8 },
+      { x: 4, y: 8 },
+      { x: 5, y: 8 },
+      { x: 5, y: 7 },
+      { x: 5, y: 6 },
+      { x: 6, y: 6 },
+      { x: 7, y: 6 },
+      { x: 8, y: 6 },
+      { x: 8, y: 5 },
+      { x: 8, y: 4 },
+      { x: 8, y: 3 },
+      { x: 8, y: 2 },
+      { x: 8, y: 1 },
+      { x: 8, y: 0 }
+    ],
+    baseCell: { x: 8, y: 0 },
+    waveModifier: DEFAULT_WAVE_MODIFIER
+  }
+};
+
+const MAP_IDS = Object.keys(MAPS);
+const DEFAULT_MAP_ID = 'map1';
+const BOARD = MAPS[DEFAULT_MAP_ID];
+
+MAP_IDS.forEach((mapId) => validateMap(MAPS[mapId]));
+
+function validateMap(map) {
+  const pathCells = {};
+  map.path.forEach((cell, index) => {
+    if (cell.x < 0 || cell.x >= map.cols || cell.y < 0 || cell.y >= map.rows) {
+      throw new Error(`${map.id} path out of bounds: ${JSON.stringify(cell)}`);
+    }
+
+    const key = `${cell.x},${cell.y}`;
+    if (pathCells[key]) {
+      throw new Error(`${map.id} path duplicated: ${key}`);
+    }
+    pathCells[key] = true;
+
+    if (index > 0) {
+      const prev = map.path[index - 1];
+      const step = Math.abs(prev.x - cell.x) + Math.abs(prev.y - cell.y);
+      if (step !== 1) {
+        throw new Error(`${map.id} path is not continuous: ${JSON.stringify(prev)} -> ${JSON.stringify(cell)}`);
+      }
+    }
+  });
+
+  map.initialBuildCells.forEach((cell) => {
+    if (cell.x < 0 || cell.x >= map.cols || cell.y < 0 || cell.y >= map.rows) {
+      throw new Error(`${map.id} build cell out of bounds: ${JSON.stringify(cell)}`);
+    }
+    if (pathCells[`${cell.x},${cell.y}`]) {
+      throw new Error(`${map.id} build cell overlaps path: ${JSON.stringify(cell)}`);
+    }
+  });
+
+  const last = map.path[map.path.length - 1];
+  if (!last || last.x !== map.baseCell.x || last.y !== map.baseCell.y) {
+    throw new Error(`${map.id} baseCell must equal the last path cell`);
+  }
+}
 
 const PLAYER_DEFAULTS = {
   hp: 3,
@@ -198,7 +296,7 @@ const HERO_GROWTH = [
 // 武将升级所需经验。数组下标对应“升到下一等级”的门槛。
 const HERO_EXP_NEEDS = [10, 35, 75, 130];
 
-// 敌方大将波次效果配置。每 5 波会抽一个大将，并触发对应干扰效果。
+// 敌方大将波次效果配置。每 6 波会抽一个大将，并触发对应干扰效果。
 const GENERALS = [
   { name: '吕布', skillText: '基础单位攻击降低', type: 'attackDown' },
   { name: '司马懿', skillText: '基础单位攻速降低', type: 'speedDown' },
@@ -232,6 +330,9 @@ module.exports = {
   TILE,
   ITEM_KIND,
   GAME_STATUS,
+  MAPS,
+  MAP_IDS,
+  DEFAULT_MAP_ID,
   BOARD,
   PLAYER_DEFAULTS,
   RECRUIT_WEIGHTS,

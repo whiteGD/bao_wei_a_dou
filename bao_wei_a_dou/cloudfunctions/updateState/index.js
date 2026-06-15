@@ -24,6 +24,7 @@ exports.main = async function main(event) {
   const now = Date.now();
   const safeSnapshot = {
     side: player.side,
+    mapId: String(snapshot.mapId || room.mapId || 'map1'),
     wave: Number(snapshot.wave || 0),
     hp: Number(snapshot.hp || 0),
     gold: Number(snapshot.gold || 0),

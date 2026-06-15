@@ -3,12 +3,18 @@ const cloud = require('wx-server-sdk');
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 const db = cloud.database();
+const MAP_IDS = ['map1', 'map2'];
+
+function pickRandomMapId() {
+  return MAP_IDS[Math.floor(Math.random() * MAP_IDS.length)] || 'map1';
+}
 
 exports.main = async function main(event) {
   const wxContext = cloud.getWXContext();
   const now = Date.now();
   const roomId = `R${now.toString(36).toUpperCase()}${Math.floor(Math.random() * 999).toString().padStart(3, '0')}`;
   const seed = `${roomId}_${now}_${Math.random()}`;
+  const mapId = pickRandomMapId();
 
   const room = {
     roomId,
@@ -16,6 +22,7 @@ exports.main = async function main(event) {
     mode: 'duel',
     roundId: 1,
     seed,
+    mapId,
     battleStartAt: 0,
     states: {},
     players: [
@@ -46,6 +53,7 @@ exports.main = async function main(event) {
     side: 'A',
     roundId: 1,
     seed,
+    mapId,
     battleStartAt: 0,
     status: room.status
   };

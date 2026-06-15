@@ -3,7 +3,8 @@
   TILE,
   ITEM_KIND,
   GAME_STATUS,
-  BOARD,
+  MAPS,
+  DEFAULT_MAP_ID,
   PLAYER_DEFAULTS,
   BASIC_UNITS,
   HERO_PAIRS,
@@ -85,6 +86,7 @@ class Game {
     this.players = {};
     this.boards = {};
     this.effects = [];
+    this.mapId = DEFAULT_MAP_ID;
 
     this.handleTouchStart = this.handleTouchStart.bind(this);
     this.handleTouchMove = this.handleTouchMove.bind(this);
@@ -188,6 +190,7 @@ class Game {
       this.selfSide = room.side || 'A';
       this.roundId = room.roundId || 1;
       this.rememberActiveRoom(room.roomId);
+      this.setMapId(room.mapId || DEFAULT_MAP_ID);
       this.resetLocalGame(room.seed || String(Date.now()));
 
       if (this.cloud.enabled && room.status === 'waiting') {
@@ -222,6 +225,7 @@ class Game {
       this.selfSide = room.side || 'B';
       this.roundId = room.roundId || 1;
       this.rememberActiveRoom(room.roomId);
+      this.setMapId(room.mapId || DEFAULT_MAP_ID);
       this.resetLocalGame(room.seed || String(Date.now()));
 
       if (room.status === 'waiting') {
@@ -421,6 +425,7 @@ class Game {
   startRematchRound(room) {
     this.roundId = room.roundId || this.roundId || 1;
     this.room = Object.assign({}, this.room, room);
+    this.setMapId(room.mapId || this.mapId || DEFAULT_MAP_ID);
     this.resetLocalGame(room.seed || String(Date.now()));
     this.modal = null;
     this.rematchWaiting = false;
@@ -454,16 +459,32 @@ class Game {
     }
   }
 
+  setMapId(mapId) {
+    this.mapId = MAPS[mapId] ? mapId : DEFAULT_MAP_ID;
+  }
+
+  getBoardConfig() {
+    return MAPS[this.mapId] || MAPS[DEFAULT_MAP_ID];
+  }
+
+  pickRandomMapId(seed) {
+    const mapIds = Object.keys(MAPS);
+    if (!mapIds.length) return DEFAULT_MAP_ID;
+    const rng = new SeededRandom(seed || String(Date.now()));
+    return rng.pick(mapIds) || DEFAULT_MAP_ID;
+  }
+
   // 重置一局本地游戏：双方玩家、双方棋盘、拖拽状态和临时提示都会回到初始值。
   resetLocalGame(seed) {
     this.seed = seed || String(Date.now());
+    const boardConfig = this.getBoardConfig();
     this.players = {
       [SIDES.SELF]: createPlayerState(SIDES.SELF),
       [SIDES.RIVAL]: createPlayerState(SIDES.RIVAL)
     };
     this.boards = {
-      [SIDES.SELF]: createBoardState(SIDES.SELF),
-      [SIDES.RIVAL]: createBoardState(SIDES.RIVAL)
+      [SIDES.SELF]: createBoardState(SIDES.SELF, boardConfig),
+      [SIDES.RIVAL]: createBoardState(SIDES.RIVAL, boardConfig)
     };
     this.effects = [];
     this.drag = null;
@@ -514,6 +535,7 @@ class Game {
     this.closeRealtimeWatchers();
     this.modal = null;
     this.room = null;
+    this.setMapId(this.pickRandomMapId(`local_restart_${Date.now()}`));
     this.resetLocalGame();
     this.status = GAME_STATUS.PLAYING;
   }
@@ -807,6 +829,7 @@ class Game {
     });
 
     const snapshot = {
+      mapId: this.mapId,
       wave: board.wave,
       hp: player.hp,
       gold: player.gold,
@@ -867,6 +890,9 @@ class Game {
   }
 
   applyStateSnapshot(side, snapshot) {
+    if (snapshot.mapId && snapshot.mapId !== this.mapId) {
+      console.warn('remote mapId mismatch', snapshot.mapId, this.mapId);
+    }
     const player = this.players[side];
     const board = this.boards[side];
     player.hp = Number(snapshot.hp || 0);
@@ -877,12 +903,12 @@ class Game {
     board.wave = Number(snapshot.wave || 0);
     board.waveActive = !!snapshot.waveActive;
     board.waveClock = Number(snapshot.waveClock || 0);
-    board.waveConfig = createWaveConfig(Math.max(1, board.wave || 1));
+    board.waveConfig = createWaveConfig(Math.max(1, board.wave || 1), this.getBoardConfig());
     board.spawnedInWave = Number(snapshot.spawnedInWave || 0);
     board.spawnClock = Number(snapshot.spawnClock || 0);
     board.generalSpawned = !!snapshot.generalSpawned;
 
-    const freshTiles = createBoardState(side).tiles;
+    const freshTiles = createBoardState(side, this.getBoardConfig()).tiles;
     board.tiles = freshTiles;
     (snapshot.tiles || []).forEach((tile) => {
       const target = board.tiles.get(cellKey(tile));
@@ -971,7 +997,7 @@ class Game {
     board.waveActive = true;
     board.spawnedInWave = 0;
     board.spawnClock = 0;
-    board.waveConfig = createWaveConfig(board.wave);
+    board.waveConfig = createWaveConfig(board.wave, this.getBoardConfig());
 
     if (board.waveConfig.general) {
       this.showGeneralWarning(side, board.waveConfig.general);
@@ -1037,7 +1063,7 @@ class Game {
       const speed = enemy.speed * (enemy.slowTime > 0 ? 0.55 : 1);
       enemy.pathProgress += speed * dt;
 
-      if (enemy.pathProgress >= BOARD.path.length - 1) {
+      if (enemy.pathProgress >= this.getBoardConfig().path.length - 1) {
         board.enemies.splice(i, 1);
         this.damageBase(side);
       }
@@ -1384,11 +1410,12 @@ class Game {
 
   // 根据敌人在路径上的进度，换算成棋盘上的连续坐标，方便移动和攻击判定。
   enemyCell(enemy) {
-    const index = clamp(Math.floor(enemy.pathProgress), 0, BOARD.path.length - 1);
-    const nextIndex = clamp(index + 1, 0, BOARD.path.length - 1);
+    const path = this.getBoardConfig().path;
+    const index = clamp(Math.floor(enemy.pathProgress), 0, path.length - 1);
+    const nextIndex = clamp(index + 1, 0, path.length - 1);
     const t = enemy.pathProgress - index;
-    const from = BOARD.path[index];
-    const to = BOARD.path[nextIndex];
+    const from = path[index];
+    const to = path[nextIndex];
     return {
       x: lerp(from.x, to.x, t),
       y: lerp(from.y, to.y, t)
@@ -1492,14 +1519,15 @@ class Game {
     const gapBenchToRecruit = 14;
     const bottomPadding = 14;
     const rivalScale = 0.65;
+    const boardConfig = this.getBoardConfig();
     const maxBoardW = Math.min(this.width - margin * 2, 360);
-    let cell = Math.floor(maxBoardW / BOARD.cols);
+    let cell = Math.floor(maxBoardW / boardConfig.cols);
 
     const makeMetrics = (cellSize) => {
-      const realBoardW = cellSize * BOARD.cols;
-      const boardH = cellSize * BOARD.rows;
+      const realBoardW = cellSize * boardConfig.cols;
+      const boardH = cellSize * boardConfig.rows;
       const rivalCell = Math.max(10, Math.floor(cellSize * rivalScale));
-      const rivalH = rivalCell * BOARD.rows;
+      const rivalH = rivalCell * boardConfig.rows;
       const benchCell = Math.floor((realBoardW - 16) / 5);
       const rivalY = topBarY + topBarHeight + gapTopToRival;
       const recruitY = safeBottom - bottomPadding - recruitH;
@@ -1532,7 +1560,7 @@ class Game {
     const x = Math.floor((this.width - realBoardW) / 2);
     const selfY = metrics.selfY;
     const rivalCell = metrics.rivalCell;
-    const rivalW = rivalCell * BOARD.cols;
+    const rivalW = rivalCell * boardConfig.cols;
 
     this.layout = {
       margin,
@@ -1549,7 +1577,7 @@ class Game {
       rivalBoardX: Math.floor((this.width - rivalW) / 2),
       rivalBoardY: metrics.rivalY,
       rivalBoardW: rivalW,
-      rivalBoardH: rivalCell * BOARD.rows,
+      rivalBoardH: rivalCell * boardConfig.rows,
       benchY: metrics.benchY,
       benchCell: metrics.benchCell,
       recruitButton: { x: x + realBoardW / 2 - recruitW / 2, y: metrics.recruitY, w: recruitW, h: recruitH },
@@ -1743,12 +1771,13 @@ class Game {
     const x0 = small ? l.rivalBoardX : l.boardX;
     const y0 = small ? l.rivalBoardY : l.selfBoardY;
     const board = this.boards[side];
+    const boardConfig = this.getBoardConfig();
 
     ctx.save();
     if (small) ctx.globalAlpha = 0.74;
 
     ctx.fillStyle = COLORS.shadow;
-    roundedRect(ctx, x0 + 3, y0 + 4, cell * BOARD.cols, cell * BOARD.rows, 5);
+    roundedRect(ctx, x0 + 3, y0 + 4, cell * boardConfig.cols, cell * boardConfig.rows, 5);
     ctx.fill();
 
     board.tiles.forEach((tile) => {
@@ -1772,7 +1801,7 @@ class Game {
     board.units.forEach((unit) => this.drawUnit(ctx, unit, side, small));
     board.enemies.forEach((enemy) => this.drawEnemy(ctx, enemy, side, small));
 
-    const base = this.cellToPixel(BOARD.baseCell, side, small);
+    const base = this.cellToPixel(boardConfig.baseCell, side, small);
     const player = this.players[side];
     const hpText = '♥'.repeat(Math.max(0, player.hp));
     drawCenteredText(ctx, hpText, base.x + cell / 2, base.y - (small ? 3 : 7), {
@@ -2353,6 +2382,7 @@ class Game {
       else if (pointInRect(p, this.buttons.localBtn)) {
         this.room = null;
         this.closeRealtimeWatchers();
+        this.setMapId(this.pickRandomMapId(`local_start_${Date.now()}`));
         this.resetLocalGame();
         this.status = GAME_STATUS.PLAYING;
       }
@@ -2392,6 +2422,7 @@ class Game {
         this.confirmSurrender();
         return;
       }
+      this.setMapId(this.pickRandomMapId(`local_reset_${Date.now()}`));
       this.resetLocalGame();
       this.status = GAME_STATUS.PLAYING;
       return;
@@ -2788,8 +2819,9 @@ class Game {
     const x0 = small ? l.rivalBoardX : l.boardX;
     const y0 = small ? l.rivalBoardY : l.selfBoardY;
     const mirrored = side === SIDES.RIVAL;
-    const x = mirrored ? BOARD.cols - 1 - cell.x : cell.x;
-    const y = mirrored ? BOARD.rows - 1 - cell.y : cell.y;
+    const boardConfig = this.getBoardConfig();
+    const x = mirrored ? boardConfig.cols - 1 - cell.x : cell.x;
+    const y = mirrored ? boardConfig.rows - 1 - cell.y : cell.y;
     return { x: x0 + x * size, y: y0 + y * size };
   }
 
@@ -2801,10 +2833,11 @@ class Game {
     const y0 = small ? l.rivalBoardY : l.selfBoardY;
     const col = Math.floor((point.x - x0) / size);
     const row = Math.floor((point.y - y0) / size);
-    if (col < 0 || col >= BOARD.cols || row < 0 || row >= BOARD.rows) return null;
+    const boardConfig = this.getBoardConfig();
+    if (col < 0 || col >= boardConfig.cols || row < 0 || row >= boardConfig.rows) return null;
 
     if (side === SIDES.RIVAL) {
-      return { x: BOARD.cols - 1 - col, y: BOARD.rows - 1 - row };
+      return { x: boardConfig.cols - 1 - col, y: boardConfig.rows - 1 - row };
     }
     return { x: col, y: row };
   }
@@ -2822,21 +2855,21 @@ function createPlayerState(side) {
 }
 
 // 创建某一方的棋盘状态，包含格子、单位、敌人、波次计时和大将干扰状态。
-function createBoardState(side) {
+function createBoardState(side, boardConfig) {
   const tiles = new Map();
-  for (let y = 0; y < BOARD.rows; y += 1) {
-    for (let x = 0; x < BOARD.cols; x += 1) {
+  for (let y = 0; y < boardConfig.rows; y += 1) {
+    for (let x = 0; x < boardConfig.cols; x += 1) {
       tiles.set(cellKey({ x, y }), { x, y, type: TILE.GRASS });
     }
   }
 
-  BOARD.path.forEach((cell) => {
+  boardConfig.path.forEach((cell) => {
     tiles.get(cellKey(cell)).type = TILE.PATH;
   });
-  BOARD.initialBuildCells.forEach((cell) => {
+  boardConfig.initialBuildCells.forEach((cell) => {
     tiles.get(cellKey(cell)).type = TILE.BUILD;
   });
-  tiles.get(cellKey(BOARD.baseCell)).type = TILE.BASE;
+  tiles.get(cellKey(boardConfig.baseCell)).type = TILE.BASE;
 
   return {
     side,
@@ -2846,7 +2879,7 @@ function createBoardState(side) {
     wave: 0,
     waveActive: false,
     waveClock: 3,
-    waveConfig: createWaveConfig(1),
+    waveConfig: createWaveConfig(1, boardConfig),
     spawnedInWave: 0,
     spawnClock: 0,
     generalSpawned: false,
@@ -2855,15 +2888,21 @@ function createBoardState(side) {
 }
 
 // 根据波次数生成敌人数量、血量、速度、护甲和是否出现大将。
-function createWaveConfig(wave) {
+function createWaveConfig(wave, boardConfig) {
+  const modifier = boardConfig && boardConfig.waveModifier ? boardConfig.waveModifier : {};
+  const enemyCountRate = modifier.enemyCountRate || 1;
+  const enemyHpRate = modifier.enemyHpRate || 1;
+  const enemySpeedRate = modifier.enemySpeedRate || 1;
+  const enemyArmorBonus = modifier.enemyArmorBonus || 0;
+  const spawnIntervalRate = modifier.spawnIntervalRate || 1;
   const general = wave > 0 && wave % 6 === 0 ? GENERALS[(wave / 6 - 1) % GENERALS.length] : null;
   return {
     wave,
-    enemyCount: 8 + Math.floor(wave * 1.5),
-    enemyHp: 4 + wave * 4,
-    enemyArmor: Math.floor(wave / 3),
-    enemySpeed: 1,
-    spawnInterval: Math.max(0.35, 0.9 - wave * 0.015),
+    enemyCount: Math.round((8 + Math.floor(wave * 1.5)) * enemyCountRate),
+    enemyHp: (4 + wave * 4) * enemyHpRate,
+    enemyArmor: Math.floor(wave / 3) + enemyArmorBonus,
+    enemySpeed: 1 * enemySpeedRate,
+    spawnInterval: Math.max(0.35, (0.9 - wave * 0.015) * spawnIntervalRate),
     prepareSeconds: 3,
     general
   };

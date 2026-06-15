@@ -1,4 +1,12 @@
-const { CLOUD_ENV_ID, RECRUIT_WEIGHTS, BASIC_UNIT_IDS, SPECIAL_CHARS, ITEM_KIND } = require('./config');
+const {
+  CLOUD_ENV_ID,
+  RECRUIT_WEIGHTS,
+  BASIC_UNIT_IDS,
+  SPECIAL_CHARS,
+  ITEM_KIND,
+  MAP_IDS,
+  DEFAULT_MAP_ID
+} = require('./config');
 const { SeededRandom, makeId } = require('./utils');
 
 class CloudService {
@@ -28,11 +36,13 @@ class CloudService {
       return this.callFunction('createRoom', {});
     }
 
+    const mapId = pickRandomMapId(`local_create_${Date.now()}`);
     this.localRoom = {
       roomId: makeId('room'),
       side: 'A',
       roundId: 1,
       seed: String(Date.now()),
+      mapId,
       status: 'playing'
     };
     return this.localRoom;
@@ -48,6 +58,7 @@ class CloudService {
       side: 'B',
       roundId: 1,
       seed: String(Date.now()),
+      mapId: this.localRoom && this.localRoom.mapId ? this.localRoom.mapId : pickRandomMapId(`local_join_${Date.now()}`),
       status: 'playing'
     };
     return this.localRoom;
@@ -91,6 +102,7 @@ class CloudService {
     if (this.localRoom) {
       this.localRoom.roundId = (this.localRoom.roundId || 1) + 1;
       this.localRoom.seed = String(Date.now());
+      this.localRoom.mapId = pickRandomMapId(`local_restart_${Date.now()}`);
       this.localRoom.status = 'playing';
     }
     return this.localRoom || { ok: true, status: 'playing' };
@@ -161,6 +173,11 @@ class CloudService {
       });
     });
   }
+}
+
+function pickRandomMapId(seed) {
+  const rng = new SeededRandom(seed || String(Date.now()));
+  return rng.pick(MAP_IDS) || DEFAULT_MAP_ID;
 }
 
 function createRecruitItems(payload) {

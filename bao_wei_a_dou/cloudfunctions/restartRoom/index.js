@@ -3,6 +3,11 @@ const cloud = require('wx-server-sdk');
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 const db = cloud.database();
+const MAP_IDS = ['map1', 'map2'];
+
+function pickRandomMapId() {
+  return MAP_IDS[Math.floor(Math.random() * MAP_IDS.length)] || 'map1';
+}
 
 exports.main = async function main(event) {
   const wxContext = cloud.getWXContext();
@@ -59,6 +64,7 @@ exports.main = async function main(event) {
 
     const nextRoundId = roundId + 1;
     const seed = `${roomId}_${nextRoundId}_${now}_${Math.random()}`;
+    const mapId = pickRandomMapId();
     const battleStartAt = now + 3000;
 
     await transaction.collection('rooms').doc(roomDocId).update({
@@ -66,6 +72,7 @@ exports.main = async function main(event) {
         status: 'playing',
         roundId: nextRoundId,
         seed,
+        mapId,
         battleStartAt,
         states: {},
         failures: [],
@@ -81,6 +88,7 @@ exports.main = async function main(event) {
       status: 'playing',
       roundId: nextRoundId,
       seed,
+      mapId,
       battleStartAt
     };
   });
